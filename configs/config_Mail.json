@@ -82,17 +82,13 @@
       "name": "get_prize",
       "steps": [
         {
-          "action": "wait_and_click_any",
-          "templates": ["get_prize.png", "get_allprize.png"],
-          "timeout": 20,
+          "action": "click_any_while_exists",
+          "templates": ["get_allprize.png", "get_confirm.png"],
+          "per_timeout": 5,
           "threshold": 0.7,
-          "click_times": 1
-        },
-        {
-        "action": "wait_and_click",
-        "template": "get_confirm.png",
-        "timeout": 20,
-        "threshold": 0.7
+          "click_times": 1,
+          "max_clicks": 10,
+          "max_duration": 30
         }
       ]
     },
@@ -100,7 +96,6 @@
       "name": "collect_all_mail",
       "steps": [
         { "use_macro": "open_mail" },
-
         { "use_macro": "collect_mail_once" },
         { "use_macro": "quiet_mail" }
       ]
@@ -109,22 +104,15 @@
     {
       "name": "reget_prize",
       "steps": [
-            {
-              "action": "wait_and_click_any",
-              "templates": ["get_allprize.png","get_confirm.png"],
-              "per_timeout": 1,
-              "threshold": 0.7,
-              "click_times": 1,
-              "max_clicks": 50,
-              "max_duration": 120
-            },
-
-            {
-                "action": "wait_and_click",
-                "template": "get_confirm.png",
-                "timeout": 20,
-                "threshold": 0.7
-            }
+        {
+          "action": "click_any_while_exists",
+          "templates": ["get_prize.png", "get_confirm.png"],
+          "per_timeout": 5,
+          "threshold": 0.7,
+          "click_times": 1,
+          "max_clicks": 10,
+          "max_duration": 30
+        }
       ]
     },
 
@@ -132,7 +120,6 @@
       "name": "get_uniteprize",
       "steps": [
         { "use_macro": "open_menu" },
-
         {
           "action": "wait_and_click",
           "template": "LaborUnion.png",
@@ -151,7 +138,6 @@
           "timeout": 20,
           "threshold": 0.5
         },
-
         { "use_macro": "return_to_main" }
 
              ]

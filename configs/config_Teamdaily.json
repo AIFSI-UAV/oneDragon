@@ -99,7 +99,7 @@
           "action": "wait_and_click",
           "template": "EliteBoss.png",
           "timeout": 20,
-          "threshold": 0.5
+          "threshold": 0.6
         },
 
         {
@@ -125,7 +125,7 @@
           "per_timeout": 60,
           "threshold": 0.8,
           "max_wait": 600,
-          "click_times": 2,
+          "click_times": 1,
           "ensure_disappeared": true,
           "verify_timeout": 10,
           "verify_interval": 1.0
@@ -148,6 +148,10 @@
           "ensure_disappeared": true,
           "verify_timeout": 10,
           "verify_interval": 1.0
+        },
+        {
+          "action": "sleep",
+          "seconds": 3
         }
       ]
     }

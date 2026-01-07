@@ -111,6 +111,31 @@
         "timeout": 20,
         "threshold": 0.7
       },
+      {
+        "action": "wait_and_click_yes",
+        "primary_template": "quiet_teamhint.png",
+        "fallback_template": "confirm.png",
+        "primary_timeout": 3,
+        "fallback_timeout": 10,
+        "threshold": 0.7,
+        "click_times": 1,
+        "ignore_fallback_fail": true
+      },
+      {
+        "action": "sleep",
+        "seconds": 5
+      },
+      {
+        "action": "wait_and_click_yes",
+        "primary_template": "auto_playresult.png",
+        "fallback_template": "confirm.png",
+        "primary_timeout": 3,
+        "fallback_timeout": 20,
+        "threshold": 0.7,
+        "click_times": 1,
+        "ignore_fallback_fail": true
+      },
+
       { "use_macro": "exit_after_battle" }
       ]
     },
@@ -129,7 +154,7 @@
 
         { "use_macro": "team_full" },
         { "use_macro": "exit_after_battle" }
-      ]
+            ]
     },
 
     {

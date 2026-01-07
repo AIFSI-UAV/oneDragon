@@ -4,7 +4,7 @@ from fake_dungeon import DungeonAutomation
 CONFIG_FLOW = [
     "configs/config_Persondaily.json",   # 1. 个人日常
     "configs/config_Teamdaily.json",     # 2. 组队日常
-    "configs/config_Mail.json"           # 3. 领邮箱
+    "configs/config_Mail.json",          # 3. 领邮箱
     "configs/config_roles.json",         # 4.切换角色
    # "configs/config_Boss.json",         # 5. 打 BOSS
 

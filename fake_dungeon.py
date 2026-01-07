@@ -88,26 +88,63 @@ class ADBDevice:
             time.sleep(random.uniform(*delay))
 
 # ========= 眼睛：TemplateMatcher =========
+
 class TemplateMatcher:
-    """基于 OpenCV 的模板匹配"""
+    """基于 OpenCV 的模板匹配 + 模板缓存 + 灰度截图复用"""
 
     def __init__(self, templates_dir="templates", screenshot_dir="screenshots"):
+        # 基于 fake_dungeon.py 文件所在目录，构造绝对路径
         base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # 支持从 config 传入类似 "templates/Mail" 的子目录
         self.templates_dir = os.path.join(base_dir, templates_dir)
         self.screenshot_dir = os.path.join(base_dir, screenshot_dir)
+
         os.makedirs(self.templates_dir, exist_ok=True)
         os.makedirs(self.screenshot_dir, exist_ok=True)
 
-    def find_template_in_image(self, image, template_name, threshold=0.8):
+        # ★ 模板缓存：key 用模板的绝对路径，value 是灰度模板 ndarray
+        #   { "D:/.../templates/xxx.png": gray_template_ndarray }
+        self._template_cache = {}
+
+    # ---------------- 模板缓存核心方法 ----------------
+
+    def _get_gray_template(self, template_name: str):
+        """
+        从缓存中获取灰度模板；若缓存未命中，则从磁盘读取并转灰度后缓存。
+        失败时返回 None。
+        """
         template_path = os.path.join(self.templates_dir, template_name)
+
+        # 1) 先查缓存
+        cached = self._template_cache.get(template_path)
+        if cached is not None:
+            return cached
+
+        # 2) 缓存中没有，读文件
         template = cv2.imread(template_path)
         if template is None:
             print(f"[模板缺失] {template_path}")
             return None
 
-        gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+        self._template_cache[template_path] = gray_template
+        return gray_template
 
+    # ---------------- 灰度截图上的匹配核心 ----------------
+
+    def _find_template_in_gray(self, gray_screen, template_name, threshold=0.8):
+        """
+        在灰度截图 gray_screen 中匹配单个模板。
+        gray_screen: 单通道灰度图 (ndarray)
+        返回 (cx, cy) 或 None
+        """
+        gray_template = self._get_gray_template(template_name)
+        if gray_template is None:
+            # 已在 _get_gray_template 打印了缺失信息
+            return None
+
+        # 基本尺寸检查
         if (gray_screen.shape[0] < gray_template.shape[0] or
                 gray_screen.shape[1] < gray_template.shape[1]):
             print(f"[模板尺寸异常] {template_name}")
@@ -121,20 +158,26 @@ class TemplateMatcher:
             cx = max_loc[0] + w // 2
             cy = max_loc[1] + h // 2
             return cx, cy
+
         return None
 
-    def wait_and_click(
-        self,
-        adb: "ADBDevice",
-        template_name: str,
-        timeout: float = 30,
-        interval: float = 1.0,
-        threshold: float = 0.8,
-        click_times: int = 1,
-    ) -> bool:
+    # ---------------- 单模板匹配（兼容旧接口） ----------------
+
+    def find_template_in_image(self, image, template_name, threshold=0.8):
         """
-        等待某个模板在屏幕上出现，然后点击（可以点击多次）。
-        click_times: 点击次数，默认为 1；比如 Leave 可以设为 2。
+        在给定彩色 image 中查找单个模板 template_name，返回中心坐标或 None。
+        注意：内部会把 image 转灰度后调用 _find_template_in_gray。
+        """
+        gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return self._find_template_in_gray(gray_screen, template_name, threshold)
+
+    def wait_and_click(self, adb: "ADBDevice", template_name,
+                       timeout=30, interval=1.0, threshold=0.8,
+                       click_times: int = 1):
+        """
+        常用模式：等待某个模板出现，然后点击（可多次点击）。
+        返回 True 表示点击成功，False 表示超时未检测到。
+        ★ 每轮截图只转一次灰度，后面匹配都在灰度图上完成。
         """
         start = time.time()
         shot_path = os.path.join(self.screenshot_dir, "screen.png")
@@ -149,12 +192,13 @@ class TemplateMatcher:
                 time.sleep(interval)
                 continue
 
-            pos = self.find_template_in_image(img, template_name, threshold)
+            # 一次性转灰度
+            gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            pos = self._find_template_in_gray(gray_screen, template_name, threshold)
             if pos:
                 print(f"[wait_and_click] {template_name} at {pos}, click_times={click_times}")
                 for _ in range(max(1, click_times)):
                     adb.tap(pos[0], pos[1])
-                    time.sleep(0.15)  # 双击之间短暂停顿
                 return True
 
             time.sleep(interval)
@@ -162,105 +206,7 @@ class TemplateMatcher:
         print(f"[wait_and_click] 等待 {template_name} 超时({timeout}s)")
         return False
 
-    def find_any_template_in_image(self, image, template_names, threshold=0.8):
-        """
-        在同一张截图里，尝试匹配多个模板，只要有一个达到阈值就返回：
-        返回值: (命中的模板文件名, (cx, cy)) 或 (None, None)
-        """
-        best_tpl = None
-        best_pos = None
-        best_val = 0.0
-
-        gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        for tpl_name in template_names:
-            template_path = os.path.join(self.templates_dir, tpl_name)
-            template = cv2.imread(template_path)
-            if template is None:
-                print(f"[模板缺失] {template_path}")
-                continue
-
-            gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-
-            if (gray_screen.shape[0] < gray_template.shape[0] or
-                    gray_screen.shape[1] < gray_template.shape[1]):
-                print(f"[模板尺寸异常] {tpl_name}")
-                continue
-
-            result = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-            if max_val >= threshold and max_val > best_val:
-                h, w = gray_template.shape
-                cx = max_loc[0] + w // 2
-                cy = max_loc[1] + h // 2
-                best_val = max_val
-                best_tpl = tpl_name
-                best_pos = (cx, cy)
-
-        return best_tpl, best_pos
-
-    def wait_and_click_any(
-            self,
-            adb: "ADBDevice",
-            template_names,
-            timeout: float = 30,
-            interval: float = 1.0,
-            threshold: float = 0.8,
-            click_times: int = 1,
-    ):
-        """
-        在多个模板中只要识别到任意一个就点击。
-        返回: (True, 命中的模板名) 或 (False, None)
-        """
-        start = time.time()
-        shot_path = os.path.join(self.screenshot_dir, "screen_any.png")
-
-        while time.time() - start < timeout:
-            if not adb.screenshot(shot_path):
-                time.sleep(interval)
-                continue
-
-            img = cv2.imread(shot_path)
-            if img is None:
-                time.sleep(interval)
-                continue
-
-            hit_tpl, pos = self.find_any_template_in_image(img, template_names, threshold)
-            if hit_tpl is not None and pos is not None:
-                print(f"[wait_and_click_any] 命中 {hit_tpl} at {pos}, click_times={click_times}")
-                for _ in range(click_times):
-                    adb.tap(pos[0], pos[1])
-                    time.sleep(0.1)
-                return True, hit_tpl
-
-            time.sleep(interval)
-
-        print(f"[wait_and_click_any] 在 {timeout}s 内未检测到 {template_names}")
-        return False, None
-
-    def exists_on_screen(
-        self,
-        adb: "ADBDevice",
-        template_name: str,
-        threshold: float = 0.8,
-    ) -> bool:
-        """
-        截一张当前屏幕，检查 template 是否存在（只检查一次，不点击）。
-        返回 True 表示仍然能看到该模板，False 表示没找到。
-        """
-        shot_path = os.path.join(self.screenshot_dir, "verify_screen.png")
-        if not adb.screenshot(shot_path):
-            print("[exists_on_screen] 截图失败")
-            return False
-
-        img = cv2.imread(shot_path)
-        if img is None:
-            print("[exists_on_screen] 读取截图失败")
-            return False
-
-        pos = self.find_template_in_image(img, template_name, threshold)
-        return pos is not None
+    # ---------------- 只检测不点击 ----------------
 
     def wait_for_template(
         self,
@@ -274,6 +220,7 @@ class TemplateMatcher:
         只等待某个模板出现，不点击。
         - 返回 True: 在 timeout 内检测到 template_name
         - 返回 False: 超时仍未检测到
+        ★ 每轮截图只转一次灰度。
         """
         start = time.time()
         shot_path = os.path.join(self.screenshot_dir, "wait_only.png")
@@ -288,7 +235,8 @@ class TemplateMatcher:
                 time.sleep(interval)
                 continue
 
-            pos = self.find_template_in_image(img, template_name, threshold)
+            gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            pos = self._find_template_in_gray(gray_screen, template_name, threshold)
             if pos:
                 print(f"[wait_for_template] 检测到 {template_name} at {pos}")
                 return True
@@ -298,7 +246,90 @@ class TemplateMatcher:
         print(f"[wait_for_template] 等待 {template_name} 超时({timeout}s)")
         return False
 
+    # ---------------- 多模板：命中任意一个就点击 ----------------
+
+    def wait_and_click_any(
+        self,
+        adb: "ADBDevice",
+        templates,
+        timeout: float = 30,
+        interval: float = 1.0,
+        threshold: float = 0.8,
+        click_times: int = 1,
+    ):
+        """
+        在给定的 templates 列表中，谁先匹配成功就点谁。
+        返回 (ok, hit_template_name)：
+        - ok = True  时，hit_template_name 为匹配成功的模板名字；
+        - ok = False 时，hit_template_name = None。
+        ★ 一张截图只转一次灰度，在同一张灰度图上遍历所有模板。
+        """
+        # 防御：templates 必须是非空列表
+        if not templates or not isinstance(templates, list):
+            print(f"[wait_and_click_any] 非法的 templates 参数: {templates}")
+            return False, None
+
+        start = time.time()
+        shot_path = os.path.join(self.screenshot_dir, "screen_any.png")
+
+        while time.time() - start < timeout:
+            if not adb.screenshot(shot_path):
+                time.sleep(interval)
+                continue
+
+            img = cv2.imread(shot_path)
+            if img is None:
+                time.sleep(interval)
+                continue
+
+            # 一次性转灰度
+            gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            best_name = None
+            best_pos = None
+            best_val = -1.0
+            best_w = 0
+            best_h = 0
+
+            # 在同一张灰度图上，遍历所有模板，找匹配度最高的那个
+            for name in templates:
+                gray_template = self._get_gray_template(name)
+                if gray_template is None:
+                    continue
+
+                h, w = gray_template.shape
+                if gray_screen.shape[0] < h or gray_screen.shape[1] < w:
+                    print(f"[模板尺寸异常] {name}")
+                    continue
+
+                result = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+                if max_val > best_val:
+                    best_val = max_val
+                    best_name = name
+                    best_pos = max_loc
+                    best_w = w
+                    best_h = h
+
+            if best_name is not None and best_val >= threshold:
+                cx = best_pos[0] + best_w // 2
+                cy = best_pos[1] + best_h // 2
+                print(
+                    f"[wait_and_click_any] 命中 {best_name} at ({cx}, {cy}), "
+                    f"score={best_val:.3f}, click_times={click_times}"
+                )
+                for _ in range(max(1, click_times)):
+                    adb.tap(cx, cy)
+                return True, best_name
+
+            time.sleep(interval)
+
+        print(f"[wait_and_click_any] 在 {timeout}s 内未检测到 {templates}")
+        return False, None
+
 # ========= 大脑：DungeonAutomation =========
+
 class DungeonAutomation:
     """
     负责读取 dungeon_config.json，
@@ -333,6 +364,23 @@ class DungeonAutomation:
         raw_tasks = self.config.get("tasks", [])
         self.tasks = self._expand_tasks_with_macros(raw_tasks)
 
+        # 3）动作分发表：action -> 处理函数
+        self._action_handlers = {
+            "wait_and_click": self._handle_wait_and_click,
+            "sleep": self._handle_sleep,
+            "wait_and_click_loop": self._handle_wait_and_click_loop,
+            "wait_and_click_or":  self._handle_wait_and_click_or,
+            "wait_and_click_yes": self._handle_wait_and_click_yes,
+            "wait_and_click_any": self._handle_wait_and_click_any,
+            "click_while_exists": self._handle_click_while_exists,
+            "click_any_while_exists": self._handle_click_any_while_exists,
+            "keyevent": self._handle_keyevent,
+            "wait_for_template": self._handle_wait_for_template,
+        }
+
+    # ----------------------------------------------------------------------
+    # 配置解析：展开 tasks 中的 use_macro（老逻辑保留）
+    # ----------------------------------------------------------------------
     def _expand_tasks_with_macros(self, tasks_conf):
         """对 tasks 列表中的每个 task 展开宏"""
         expanded = []
@@ -357,16 +405,18 @@ class DungeonAutomation:
         new_task["steps"] = steps
         return new_task
 
-        # 新增：复用单步执行逻辑的内部工具
-
+    # ----------------------------------------------------------------------
+    # 通用 steps 执行：给宏用（run_macro_by_name / return_to_main）
+    # 保持原有行为，不动。
+    # ----------------------------------------------------------------------
     def _run_steps(self, steps, log_func=print, stop_flag=None) -> bool:
         """
         执行一组 steps（支持：
-          - use_macro：宏中调用其他宏
-          - wait_and_click
-          - sleep
-          - keyevent
-          - wait_for_template：只确认图片是否出现
+        - use_macro：宏中调用其他宏
+        - wait_and_click
+        - sleep
+        - keyevent
+        - wait_for_template：只确认图片是否出现
         ）
         返回 True 表示整个序列执行完成，False 表示中途失败/中断。
         """
@@ -382,7 +432,6 @@ class DungeonAutomation:
                 if not sub_steps:
                     log_func(f"[宏步骤] 未找到被引用的宏: {macro_name}")
                     return False
-
                 log_func(f"[宏步骤] 执行子宏: {macro_name}")
                 ok = self._run_steps(sub_steps, log_func=log_func, stop_flag=stop_flag)
                 if not ok:
@@ -390,7 +439,7 @@ class DungeonAutomation:
                     return False
                 continue
 
-            # 2) 普通 action
+            # 2) 普通 action（这里保留之前的实现）
             action = step.get("action")
 
             if action == "wait_and_click":
@@ -431,7 +480,8 @@ class DungeonAutomation:
                 interval = step.get("interval", 1.0)
 
                 log_func(
-                    f"[宏步骤] 开始等待模板 {tpl} 出现，timeout={timeout}, threshold={threshold}"
+                    f"[宏步骤] 开始等待模板 {tpl} 出现，"
+                    f"timeout={timeout}, threshold={threshold}"
                 )
                 ok = self.matcher.wait_for_template(
                     self.adb,
@@ -441,16 +491,21 @@ class DungeonAutomation:
                     threshold=threshold,
                 )
                 if not ok:
-                    log_func(f"[宏步骤] 在 {timeout}s 内未检测到 {tpl}，视为失败")
+                    log_func(
+                        f"[宏步骤] 在 {timeout}s 内未检测到 {tpl}，视为失败"
+                    )
                     return False
 
             else:
                 log_func(f"[宏步骤] 未知动作: {action}")
-                # 这里既可以继续，也可以视为失败。为了安全，你也可以改成 return False。
+                # 为安全起见，你也可以选择 return False
 
         # 全部 steps 执行完毕
         return True
 
+    # ----------------------------------------------------------------------
+    # 任务失败后的安全回主界面
+    # ----------------------------------------------------------------------
     def try_return_home(self, log_func=print, stop_flag=None):
         """
         任务失败时尝试执行 'return_to_main' 宏：
@@ -465,6 +520,379 @@ class DungeonAutomation:
         log_func("任务失败，执行宏 'return_to_main' 尝试返回主界面")
         self._run_steps(home_steps, log_func=log_func, stop_flag=stop_flag)
 
+    # ----------------------------------------------------------------------
+    # 各 action 的 handler（小函数）
+    # ----------------------------------------------------------------------
+    def _handle_wait_and_click(self, step, log_func, stop_flag) -> bool:
+        tpl = step["template"]
+        timeout = step.get("timeout", 30)
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)
+
+        ok = self.matcher.wait_and_click(
+            self.adb,
+            tpl,
+            timeout=timeout,
+            threshold=threshold,
+            click_times=click_times,
+        )
+        if not ok:
+            log_func(f"等待并点击 {tpl} 失败，任务提前结束")
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+        return True
+
+    def _handle_sleep(self, step, log_func, stop_flag) -> bool:
+        sec = step.get("seconds", 1)
+        log_func(f"等待 {sec} 秒")
+        time.sleep(sec)
+        return True
+
+    def _handle_wait_and_click_loop(self, step, log_func, stop_flag) -> bool:
+        tpl = step["template"]
+        per_timeout = step.get("per_timeout", 60)  # 每一轮内部等待时间
+        threshold = step.get("threshold", 0.8)
+        max_wait = step.get("max_wait", 0)        # 总等待上限（秒），0 表示无限等待
+        click_times = step.get("click_times", 1)  # 每次检测到时点击次数
+
+        start_all = time.time()
+        log_func(
+            f"开始循环等待 {tpl}，每轮 {per_timeout}s，"
+            f"max_wait={max_wait}, click_times={click_times}"
+        )
+
+        while True:
+            if stop_flag is not None and stop_flag.is_set():
+                log_func("收到停止信号，中断 wait_and_click_loop")
+                return False
+
+            ok = self.matcher.wait_and_click(
+                self.adb,
+                tpl,
+                timeout=per_timeout,
+                threshold=threshold,
+                click_times=click_times,
+            )
+            if ok:
+                log_func(f"循环等待中检测到 {tpl}，已点击 {click_times} 次")
+                break
+
+            # 检查总等待时间是否超限
+            if max_wait > 0 and (time.time() - start_all) >= max_wait:
+                log_func(
+                    f"wait_and_click_loop 超过最大等待时间 {max_wait} 秒，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+            log_func(f"{tpl} 本轮 {per_timeout}s 内未出现，继续下一轮等待...")
+        return True
+
+    def _handle_wait_and_click_or(self, step, log_func, stop_flag) -> bool:
+        primary_tpl = step["primary_template"]
+        fallback_tpl = step["fallback_template"]
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)
+        primary_timeout = step.get("primary_timeout", 3)
+        fallback_timeout = step.get("fallback_timeout", 20)
+
+        log_func(
+            f"wait_and_click_or: 优先尝试 {primary_tpl}({primary_timeout}s)，"
+            f"失败则尝试 {fallback_tpl}({fallback_timeout}s)"
+        )
+
+        # 先尝试 primary
+        ok_primary = self.matcher.wait_and_click(
+            self.adb,
+            primary_tpl,
+            timeout=primary_timeout,
+            threshold=threshold,
+            click_times=click_times,
+        )
+        if ok_primary:
+            log_func(f"优先模板 {primary_tpl} 点击成功")
+            return True
+
+        log_func(f"未检测到 {primary_tpl}，尝试备用模板 {fallback_tpl}")
+        ok_fallback = self.matcher.wait_and_click(
+            self.adb,
+            fallback_tpl,
+            timeout=fallback_timeout,
+            threshold=threshold,
+            click_times=click_times,
+        )
+        if not ok_fallback:
+            log_func(
+                f"备用模板 {fallback_tpl} 在 {fallback_timeout}s 内也未检测到，任务提前结束"
+            )
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+
+        log_func(f"备用模板 {fallback_tpl} 点击成功")
+        return True
+
+    def _handle_wait_and_click_yes(self, step, log_func, stop_flag) -> bool:
+        primary_tpl = step["primary_template"]
+        fallback_tpl = step["fallback_template"]
+        primary_timeout = step.get("primary_timeout", 3)   # 检测 primary 的时间
+        fallback_timeout = step.get("fallback_timeout", 20)
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)
+
+        log_func(
+            f"wait_and_click_yes: 如检测到 {primary_tpl} 则点击 {fallback_tpl}，"
+            f"primary_timeout={primary_timeout}, fallback_timeout={fallback_timeout}"
+        )
+
+        # 1）先只检测 primary_template，不点击
+        yes = self.matcher.wait_for_template(
+            self.adb,
+            primary_tpl,
+            timeout=primary_timeout,
+            threshold=threshold,
+        )
+        if not yes:
+            # 没检测到 primary，安静跳过本 step，不算失败
+            log_func(f"未在 {primary_timeout}s 内检测到 {primary_tpl}，跳过本步骤")
+            return True
+
+        # 2）检测到 primary，再去点击 fallback_template
+        log_func(f"检测到 {primary_tpl}，尝试点击 {fallback_tpl}")
+        ok_fallback = self.matcher.wait_and_click(
+            self.adb,
+            fallback,
+            timeout=ft,
+            threshold=thr,
+            click_times=clicks,
+        )
+
+        ignore_fail = step.get("ignore_fallback_fail", False)
+
+        if not ok_fallback:
+            if ignore_fail:
+                log_func(
+                    f"检测到 {primary}，但在 {ft}s 内未成功点击 {fallback}；"
+                    f"ignore_fallback_fail=True，跳过本步，继续后续任务"
+                )
+                return True  # 当作“本步做不了就算了”，不终止整个任务
+            else:
+                log_func(f"检测到 {primary} 但点击 {fallback} 失败，任务提前结束")
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+        return True
+
+    def _handle_wait_and_click_any(self, step, log_func, stop_flag) -> bool:
+        templates = step.get("templates")  # 必须是列表
+        if not templates or not isinstance(templates, list):
+            log_func(f"wait_and_click_any 缺少有效的 templates 列表: {templates}")
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+
+        timeout = step.get("timeout", 30)
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)
+
+        ok, hit_tpl = self.matcher.wait_and_click_any(
+            self.adb,
+            templates,
+            timeout=timeout,
+            threshold=threshold,
+            click_times=click_times,
+        )
+        if not ok:
+            log_func(
+                f"wait_and_click_any 在 {timeout}s 内未检测到 {templates}，任务提前结束"
+            )
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+
+        log_func(f"wait_and_click_any 命中模板: {hit_tpl}")
+        return True
+
+    def _handle_click_while_exists(self, step, log_func, stop_flag) -> bool:
+        tpl = step["template"]
+        per_timeout = step.get("per_timeout", 5)      # 每一轮查找的时间窗
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)      # 每次找到后点几下
+        max_clicks = step.get("max_clicks", 100)      # 总点击上限（防止死循环）
+        max_duration = step.get("max_duration", 0)    # 总时间上限，0 = 不限制
+
+        start_all = time.time()
+        total_clicks = 0
+
+        log_func(
+            f"开始 click_while_exists: 模板={tpl}, "
+            f"per_timeout={per_timeout}, threshold={threshold}, "
+            f"max_clicks={max_clicks}, max_duration={max_duration}"
+        )
+
+        while True:
+            if stop_flag is not None and stop_flag.is_set():
+                log_func("收到停止信号，中断 click_while_exists")
+                return False
+
+            # 在 per_timeout 内找一次，有就点（可能连点多下）
+            ok = self.matcher.wait_and_click(
+                self.adb,
+                tpl,
+                timeout=per_timeout,
+                threshold=threshold,
+                click_times=click_times,
+            )
+            if not ok:
+                # 本轮找不到，认为已经没有这个图标了，结束循环
+                log_func(
+                    f"在 {per_timeout}s 内未再检测到 {tpl}，认为已清空，共点击 {total_clicks} 次"
+                )
+                break
+
+            total_clicks += click_times
+            log_func(f"检测到 {tpl}，已累计点击 {total_clicks} 次")
+
+            # 安全保护：次数太多
+            if max_clicks > 0 and total_clicks >= max_clicks:
+                log_func(
+                    f"click_while_exists: 点击次数已达上限 {max_clicks}，"
+                    f"仍可能存在 {tpl}，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+            # 安全保护：总时间太长
+            if max_duration > 0 and (time.time() - start_all) >= max_duration:
+                log_func(
+                    f"click_while_exists: 总等待时间超过 {max_duration}s，"
+                    f"仍可能存在 {tpl}，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+            time.sleep(step.get("interval", 0.2))
+
+        return True
+
+    def _handle_click_any_while_exists(self, step, log_func, stop_flag) -> bool:
+        """
+        多模板版 click_while_exists：
+        只要屏幕上还存在 templates 列表中任意一个模板，就继续：
+        - wait_and_click_any 一轮
+        - 点击
+        直到连续一轮 per_timeout 内都没找到任何一个模板，才结束当前 action。
+        """
+
+        templates = step.get("templates")
+        if not templates or not isinstance(templates, list):
+            log_func(f"click_any_while_exists 缺少有效的 templates 列表: {templates}")
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+
+        per_timeout = step.get("per_timeout", 5)  # 每一轮内部查找时间窗（秒）
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)  # 每次命中后的点击次数
+        max_clicks = step.get("max_clicks", 100)  # 总点击上限（防止死循环）
+        max_duration = step.get("max_duration", 0)  # 总时间上限，0 = 不限制
+
+        start_all = time.time()
+        total_clicks = 0
+
+        log_func(
+            f"开始 click_any_while_exists: 模板={templates}, "
+            f"per_timeout={per_timeout}, threshold={threshold}, "
+            f"click_times={click_times}, max_clicks={max_clicks}, "
+            f"max_duration={max_duration}"
+        )
+
+        while True:
+            if stop_flag is not None and stop_flag.is_set():
+                log_func("收到停止信号，中断 click_any_while_exists")
+                return False
+
+            # 在 per_timeout 内，尝试命中任意一个模板
+            ok, hit_tpl = self.matcher.wait_and_click_any(
+                self.adb,
+                templates,
+                timeout=per_timeout,
+                threshold=threshold,
+                click_times=click_times,
+            )
+
+            if not ok:
+                # 当前这一轮找不到任何一个模板，认为已经清空
+                log_func(
+                    f"在 {per_timeout}s 内未再检测到 {templates} 中任意模板，"
+                    f"认为已清空，共点击 {total_clicks} 次"
+                )
+                break
+
+            total_clicks += click_times
+            log_func(
+                f"检测到 {hit_tpl}，本轮点击 {click_times} 次，"
+                f"累计点击 {total_clicks} 次"
+            )
+
+            # 安全保护：点击次数太多
+            if max_clicks > 0 and total_clicks >= max_clicks:
+                log_func(
+                    f"click_any_while_exists: 点击次数达到上限 {max_clicks}，"
+                    f"仍可能存在 {templates}，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+            # 安全保护：总时间过长
+            if max_duration > 0 and (time.time() - start_all) >= max_duration:
+                log_func(
+                    f"click_any_while_exists: 总时长超过 {max_duration}s，"
+                    f"仍可能存在 {templates}，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+            # 每轮之间小睡一下，避免过于频繁截图
+            time.sleep(step.get("interval", 0.2))
+
+        return True
+
+    def _handle_keyevent(self, step, log_func, stop_flag) -> bool:
+        keycode = step.get("keycode")
+        repeat = step.get("repeat", 1)
+        if keycode is None:
+            log_func("[keyevent] 缺少 keycode，跳过本步骤")
+            return True
+
+        log_func(f"[keyevent] 发送按键 keycode={keycode}, repeat={repeat}")
+        self.adb.keyevent(keycode, repeat=repeat)
+        return True
+
+    def _handle_wait_for_template(self, step, log_func, stop_flag) -> bool:
+        tpl = step["template"]
+        timeout = step.get("timeout", 15)
+        threshold = step.get("threshold", 0.8)
+        interval = step.get("interval", 1.0)
+
+        log_func(
+            f"[wait_for_template] 开始等待模板 {tpl} 出现，"
+            f"timeout={timeout}, threshold={threshold}"
+        )
+        ok = self.matcher.wait_for_template(
+            self.adb,
+            tpl,
+            timeout=timeout,
+            interval=interval,
+            threshold=threshold,
+        )
+        if not ok:
+            log_func(
+                f"[wait_for_template] 在 {timeout}s 内未检测到 {tpl}，任务提前结束"
+            )
+            self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+            return False
+        return True
+
+    # ----------------------------------------------------------------------
+    # 对外：执行一个任务 / 所有任务 / 带重试 / 执行宏
+    # ----------------------------------------------------------------------
     def run_single_task(self, task_conf: dict, log_func=print, stop_flag=None) -> bool:
         name = task_conf.get("name", "unnamed_task")
         log_func(f"开始任务: {name}")
@@ -474,252 +902,35 @@ class DungeonAutomation:
                 log_func("收到停止信号，中断任务")
                 return False
 
+            # 可选：在 task 里直接嵌套 use_macro（大多数时候已经在 _expand_single_task 展开了）
+            if "use_macro" in step:
+                macro_name = step["use_macro"]
+                sub_steps = self.macros.get(macro_name)
+                if not sub_steps:
+                    log_func(f"任务步骤中引用了未定义宏: {macro_name}")
+                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                    return False
+
+                log_func(f"任务内执行子宏: {macro_name}")
+                ok = self._run_steps(sub_steps, log_func=log_func, stop_flag=stop_flag)
+                if not ok:
+                    log_func(f"子宏 {macro_name} 执行失败，任务提前结束")
+                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                    return False
+                continue
+
             action = step.get("action")
+            handler = self._action_handlers.get(action)
 
-            # ------- 普通等待并点击 -------
-            if action == "wait_and_click":
-                tpl = step["template"]
-                timeout = step.get("timeout", 30)
-                threshold = step.get("threshold", 0.8)
-                click_times = step.get("click_times", 1)
-
-                ok = self.matcher.wait_and_click(
-                    self.adb,
-                    tpl,
-                    timeout=timeout,
-                    threshold=threshold,
-                    click_times=click_times,
-                )
-                if not ok:
-                    log_func(f"等待并点击 {tpl} 失败，任务提前结束")
-                    # 这里尝试自动回主界面
-                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                    return False
-
-            # ------- 简单 sleep -------
-            elif action == "sleep":
-                sec = step.get("seconds", 1)
-                log_func(f"等待 {sec} 秒")
-                time.sleep(sec)
-
-            # ------- 循环等待直到出现（支持 click_times） -------
-            elif action == "wait_and_click_loop":
-                tpl = step["template"]
-                per_timeout = step.get("per_timeout", 60)  # 每一轮内部等待时间
-                threshold = step.get("threshold", 0.8)
-                max_wait = step.get("max_wait", 0)  # 总等待上限（秒），0 表示无限等待
-                click_times = step.get("click_times", 1)  # 每次检测到时点击次数
-
-                start_all = time.time()
-                log_func(
-                    f"开始循环等待 {tpl}，每轮 {per_timeout}s，"
-                    f"max_wait={max_wait}, click_times={click_times}"
-                )
-
-                while True:
-                    if stop_flag is not None and stop_flag.is_set():
-                        log_func("收到停止信号，中断 wait_and_click_loop")
-                        return False
-
-                    ok = self.matcher.wait_and_click(
-                        self.adb,
-                        tpl,
-                        timeout=per_timeout,
-                        threshold=threshold,
-                        click_times=click_times,
-                    )
-                    if ok:
-                        log_func(f"循环等待中检测到 {tpl}，已点击 {click_times} 次")
-                        break
-
-                    # 检查总等待时间是否超限
-                    if max_wait > 0 and (time.time() - start_all) >= max_wait:
-                        log_func(
-                            f"wait_and_click_loop 超过最大等待时间 {max_wait} 秒，任务提前结束"
-                        )
-                        # 和普通失败一样，尝试回主界面
-                        self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                        return False
-
-                    log_func(f"{tpl} 本轮 {per_timeout}s 内未出现，继续下一轮等待...")
-
-                    # ------- 新增：优先点 primary_template，失败再点 fallback_template -------
-            elif action == "wait_and_click_or":
-                primary_tpl = step["primary_template"]
-                fallback_tpl = step["fallback_template"]
-
-                threshold = step.get("threshold", 0.8)
-                click_times = step.get("click_times", 1)
-
-                primary_timeout = step.get("primary_timeout", 3)
-                fallback_timeout = step.get("fallback_timeout", 20)
-
-                log_func(
-                    f"wait_and_click_or: 优先尝试 {primary_tpl}({primary_timeout}s)，"
-                    f"失败则尝试 {fallback_tpl}({fallback_timeout}s)"
-                )
-
-                # 先尝试 primary
-                ok_primary = self.matcher.wait_and_click(
-                    self.adb,
-                    primary_tpl,
-                    timeout=primary_timeout,
-                    threshold=threshold,
-                    click_times=click_times,
-                )
-
-                if ok_primary:
-                    log_func(f"优先模板 {primary_tpl} 点击成功")
-                else:
-                    log_func(f"未检测到 {primary_tpl}，尝试备用模板 {fallback_tpl}")
-
-                    ok_fallback = self.matcher.wait_and_click(
-                        self.adb,
-                        fallback_tpl,
-                        timeout=fallback_timeout,
-                        threshold=threshold,
-                        click_times=click_times,
-                    )
-
-                    if not ok_fallback:
-                        log_func(
-                            f"备用模板 {fallback_tpl} 在 {fallback_timeout}s 内也未检测到，任务提前结束"
-                        )
-                        self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                        return False
-                    else:
-                        log_func(f"备用模板 {fallback_tpl} 点击成功")
-
-            # ------- 新增：出现 primary_template 就去点击 fallback_template -------
-            elif action == "wait_and_click_yes":
-                primary_tpl = step["primary_template"]
-                fallback_tpl = step["fallback_template"]
-
-                primary_timeout = step.get("primary_timeout", 3)  # 检测 primary 的时间
-                fallback_timeout = step.get("fallback_timeout", 20)
-                threshold = step.get("threshold", 0.8)
-                click_times = step.get("click_times", 1)
-
-                log_func(
-                    f"wait_and_click_yes: 如检测到 {primary_tpl} 则点击 {fallback_tpl}，"
-                    f"primary_timeout={primary_timeout}, fallback_timeout={fallback_timeout}"
-                )
-
-                # 1）先只检测 primary_template，不点击
-                yes = self.matcher.wait_for_template(
-                    self.adb,
-                    primary_tpl,
-                    timeout=primary_timeout,
-                    threshold=threshold,
-                )
-
-                if not yes:
-                    # 没检测到 primary，安静跳过本 step，不算失败
-                    log_func(f"未在 {primary_timeout}s 内检测到 {primary_tpl}，跳过本步骤")
-                    continue  # 进入下一个 step
-
-                # 2）检测到 primary，再去点击 fallback_template
-                log_func(f"检测到 {primary_tpl}，尝试点击 {fallback_tpl}")
-                ok = self.matcher.wait_and_click(
-                    self.adb,
-                    fallback_tpl,
-                    timeout=fallback_timeout,
-                    threshold=threshold,
-                    click_times=click_times,
-                )
-
-                if not ok:
-                    log_func(f"检测到 {primary_tpl} 但点击 {fallback_tpl} 失败，任务提前结束")
-                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                    return False
-
-            # ------- 多模板：任意一个出现就点击 -------
-            elif action == "wait_and_click_any":
-                templates = step.get("templates")  # 必须是列表
-                if not templates or not isinstance(templates, list):
-                    log_func(f"wait_and_click_any 缺少有效的 templates 列表: {templates}")
-                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                    return False
-
-                timeout = step.get("timeout", 30)
-                threshold = step.get("threshold", 0.8)
-                click_times = step.get("click_times", 1)
-
-                ok, hit_tpl = self.matcher.wait_and_click_any(
-                    self.adb,
-                    templates,
-                    timeout=timeout,
-                    threshold=threshold,
-                    click_times=click_times,
-                )
-                if not ok:
-                    log_func(f"wait_and_click_any 在 {timeout}s 内未检测到 {templates}，任务提前结束")
-                    self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                    return False
-                else:
-                    log_func(f"wait_and_click_any 命中模板: {hit_tpl}")
-
-            # ------- 新增：检测有就一直点，直到消失 -------
-            elif action == "click_while_exists":
-                tpl = step["template"]
-                per_timeout = step.get("per_timeout", 5)  # 每一轮查找的时间窗
-                threshold = step.get("threshold", 0.8)
-                click_times = step.get("click_times", 1)  # 每次找到后点几下
-                max_clicks = step.get("max_clicks", 100)  # 总点击上限（防止死循环）
-                max_duration = step.get("max_duration", 0)  # 总时间上限，0 = 不限制
-
-                start_all = time.time()
-                total_clicks = 0
-                log_func(
-                    f"开始 click_while_exists: 模板={tpl}, "
-                    f"per_timeout={per_timeout}, threshold={threshold}, "
-                    f"max_clicks={max_clicks}, max_duration={max_duration}"
-                )
-
-                while True:
-                    if stop_flag is not None and stop_flag.is_set():
-                        log_func("收到停止信号，中断 click_while_exists")
-                        return False
-
-                    # 在 per_timeout 内找一次，有就点（可能连点多下）
-                    ok = self.matcher.wait_and_click(
-                        self.adb,
-                        tpl,
-                        timeout=per_timeout,
-                        threshold=threshold,
-                        click_times=click_times,
-                    )
-                    if not ok:
-                        # 本轮找不到，认为已经没有这个图标了，结束循环
-                        log_func(
-                            f"在 {per_timeout}s 内未再检测到 {tpl}，认为已清空，共点击 {total_clicks} 次"
-                        )
-                        break
-
-                    total_clicks += click_times
-                    log_func(f"检测到 {tpl}，已累计点击 {total_clicks} 次")
-
-                    # 安全保护：次数太多
-                    if max_clicks > 0 and total_clicks >= max_clicks:
-                        log_func(
-                            f"click_while_exists: 点击次数已达上限 {max_clicks}，仍可能存在 {tpl}，任务提前结束"
-                        )
-                        self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                        return False
-
-                    # 安全保护：总时间太长
-                    if max_duration > 0 and (time.time() - start_all) >= max_duration:
-                        log_func(
-                            f"click_while_exists: 总等待时间超过 {max_duration}s，仍可能存在 {tpl}，任务提前结束"
-                        )
-                        self.try_return_home(log_func=log_func, stop_flag=stop_flag)
-                        return False
-
-                    time.sleep(step.get("interval", 0.2))
-
-            # ------- 未知动作 -------
-            else:
+            if handler is None:
                 log_func(f"未知动作: {action}")
+                # 为了兼容旧行为，这里选择“跳过继续”，也可以改成 return False
+                continue
+
+            ok = handler(step, log_func, stop_flag)
+            if not ok:
+                # handler 内部已经根据需要调用了 try_return_home
+                return False
 
         log_func(f"任务 {name} 完成")
         return True
@@ -739,10 +950,10 @@ class DungeonAutomation:
                 continue
 
     def run_all_tasks_with_retry(
-            self,
-            log_func=print,
-            stop_flag=None,
-            max_rounds: int = 0
+        self,
+        log_func=print,
+        stop_flag=None,
+        max_rounds: int = 0
     ) -> bool:
         """
         带重试的任务执行：
@@ -761,15 +972,15 @@ class DungeonAutomation:
             return True
 
         round_idx = 1
-
         while True:
             # 外部请求停止，直接结束
             if stop_flag is not None and stop_flag.is_set():
                 log_func("收到停止信号，终止带重试的任务执行")
                 return False
 
-            log_func(f"\n---- 第 {round_idx} 轮任务执行，剩余任务数: {len(remaining)} ----")
-
+            log_func(
+                f"\n---- 第 {round_idx} 轮任务执行，剩余任务数: {len(remaining)} ----"
+            )
             failed = []
 
             for task in remaining:
@@ -777,7 +988,11 @@ class DungeonAutomation:
                     log_func("收到停止信号，中断当前轮任务")
                     return False
 
-                ok = self.run_single_task(task, log_func=log_func, stop_flag=stop_flag)
+                ok = self.run_single_task(
+                    task,
+                    log_func=log_func,
+                    stop_flag=stop_flag
+                )
                 if not ok:
                     failed.append(task)
 
@@ -818,7 +1033,6 @@ class DungeonAutomation:
         ok = self._run_steps(steps, log_func=log_func, stop_flag=stop_flag)
         log_func(f"[run_macro_by_name] 宏 {macro_name} 执行结束，结果: {ok}")
         return bool(ok)
-
 
 def debug_find_template(config_path: str, template_name: str, threshold: float = 0.7):
     """

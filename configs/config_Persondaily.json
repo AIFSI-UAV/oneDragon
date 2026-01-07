@@ -1,0 +1,253 @@
+{
+  "adb_path": "D:/leidian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+  "templates_dir": "templates/Persondaily",
+
+    "macros": {
+    "return_to_main": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home.png",
+        "timeout": 10
+      }
+    ],
+
+    "open_menu": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_menu.png",
+        "timeout": 10,
+        "threshold": 0.6
+      }
+    ],
+
+    "team_full": [
+      {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Maximum.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      }
+    ],
+
+    "exit_after_battle": [
+      {
+        "action": "wait_and_click_loop",
+        "template": "Leave.png",
+        "per_timeout": 60,
+        "threshold": 0.8,
+        "max_wait": 600,
+        "click_times": 2,
+        "ensure_disappeared": true,
+        "verify_timeout": 10,
+        "verify_interval": 1.0
+      }
+    ]
+
+  },
+
+  "tasks": [
+    {
+      "name": "LaborUnion",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "LaborUnion.png",
+          "timeout": 20,
+          "threshold": 0.5
+        },
+
+        { "use_macro": "return_to_main" }
+      ]
+    },
+
+    {
+      "name": "boss_Material",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "Material.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Maximum.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+      "name": "boss_weekboss",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "Weekboss.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        { "use_macro": "team_full" },
+        { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+      "name": "boss_FoodBoss",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "FoodBoss.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "green_water.png",
+        "timeout": 20,
+        "threshold": 0.8
+      },
+      {
+        "action": "wait_and_click",
+        "template": "cherry_water.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "magic_water.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Team2.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+    "name": "Monster_land",
+    "steps": [
+      { "use_macro": "open_menu" },
+
+      {
+        "action": "wait_and_click",
+        "template": "Monster_land.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+
+      {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Maximum.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "buy_experience.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "sleep",
+        "seconds": 2
+        },
+      {
+        "action": "wait_and_click",
+        "template": "Team2.png",
+        "timeout": 20,
+        "threshold": 0.5
+      },
+
+      {
+        "action": "wait_and_click_loop",
+        "template": "buy.png",
+        "per_timeout": 120,
+        "threshold": 0.6,
+        "max_wait": 600
+      },
+
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+
+      {
+        "action": "wait_and_click",
+        "template": "quiet.png",
+        "timeout": 20,
+        "threshold": 0.6
+      }
+    ]
+  }
+
+  ]
+}

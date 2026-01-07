@@ -1,0 +1,160 @@
+{
+  "adb_path": "D:/leidian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+  "templates_dir": "templates/Mail",
+
+  "macros": {
+    "return_to_main": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home.png",
+        "timeout": 10,
+        "threshold": 0.7
+      },
+      {
+        "action": "sleep",
+        "seconds": 2
+      }
+    ],
+
+    "open_menu": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_menu.png",
+        "timeout": 10,
+        "threshold": 0.6
+      }
+    ],
+
+    "open_mail": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_mail.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "sleep",
+        "seconds": 1
+      }
+    ],
+
+    "collect_mail_once": [
+      {
+        "action": "wait_and_click",
+        "template": "personally.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "wait_and_click",
+        "template": "claim.png",
+        "timeout": 20,
+        "threshold": 0.7
+      },
+      {
+        "action": "sleep",
+        "seconds": 1
+      },
+      {
+        "action": "wait_and_click",
+        "template": "claim_confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+      }
+    ],
+
+    "quiet_mail": [
+      {
+        "action": "wait_and_click",
+        "template": "mail_quiet.png",
+        "timeout": 10
+      },
+      {
+        "action": "sleep",
+        "seconds": 1
+      }
+    ]
+  },
+
+  "tasks": [
+    {
+      "name": "get_prize",
+      "steps": [
+        {
+          "action": "wait_and_click_any",
+          "templates": ["get_prize.png", "get_allprize.png"],
+          "timeout": 20,
+          "threshold": 0.7,
+          "click_times": 1
+        },
+        {
+        "action": "wait_and_click",
+        "template": "get_confirm.png",
+        "timeout": 20,
+        "threshold": 0.7
+        }
+      ]
+    },
+    {
+      "name": "collect_all_mail",
+      "steps": [
+        { "use_macro": "open_mail" },
+
+        { "use_macro": "collect_mail_once" },
+        { "use_macro": "quiet_mail" }
+      ]
+    },
+
+    {
+      "name": "reget_prize",
+      "steps": [
+            {
+              "action": "wait_and_click_any",
+              "templates": ["get_allprize.png","get_confirm.png"],
+              "per_timeout": 1,
+              "threshold": 0.7,
+              "click_times": 1,
+              "max_clicks": 50,
+              "max_duration": 120
+            },
+
+            {
+                "action": "wait_and_click",
+                "template": "get_confirm.png",
+                "timeout": 20,
+                "threshold": 0.7
+            }
+      ]
+    },
+
+    {
+      "name": "get_uniteprize",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "LaborUnion.png",
+          "timeout": 20,
+          "threshold": 0.5
+        },
+        {
+          "action": "wait_and_click",
+          "template": "unite_task.png",
+          "timeout": 20,
+          "threshold": 0.5
+        },
+        {
+          "action": "wait_and_click",
+          "template": "get_uniteprize.png",
+          "timeout": 20,
+          "threshold": 0.5
+        },
+
+        { "use_macro": "return_to_main" }
+
+             ]
+    }
+  ]
+}

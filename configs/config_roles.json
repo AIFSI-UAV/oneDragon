@@ -1,0 +1,169 @@
+{
+  "adb_path": "D:/leidian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+  "templates_dir": "templates/roles",
+
+  "macros": {
+    "return_to_main": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home.png",
+        "timeout": 40,
+        "threshold": 0.6
+        },
+      {
+          "action": "sleep",
+          "seconds": 3
+        }
+    ],
+
+    "change_role": [
+      {
+        "action": "wait_and_click",
+        "template": "change_role.png",
+        "timeout": 20,
+        "threshold": 0.6
+      }
+    ],
+
+    "confirm": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_role_confirm.png",
+        "timeout": 20,
+        "threshold": 0.6
+         },
+      {
+        "action": "sleep",
+        "seconds": 10
+        }
+    ],
+
+    "return_home": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home1.png",
+        "timeout": 20,
+        "threshold": 0.6
+         },
+      {
+        "action": "sleep",
+        "seconds": 2
+        }
+    ],
+
+
+    "switch_role_1": [
+      { "use_macro": "change_role" },
+
+      {
+        "action": "wait_and_click",
+        "template": "option_role1.png",
+        "timeout": 20,
+        "threshold": 0.9
+      },
+
+      { "use_macro": "confirm" },
+      { "use_macro": "return_home" },
+
+      {
+        "action": "wait_for_template",
+        "template": "role1_indicator.png",
+        "timeout": 15,
+        "threshold": 0.7,
+        "interval": 1.0
+      }
+    ],
+
+
+    "switch_role_2": [
+      { "use_macro": "change_role" },
+
+      {
+        "action": "wait_and_click",
+        "template": "option_role2.png",
+        "timeout": 20,
+        "threshold": 0.6
+      },
+
+      { "use_macro": "confirm" },
+      { "use_macro": "return_home" },
+
+      {
+        "action": "wait_for_template",
+        "template": "role2_indicator.png",
+        "timeout": 15,
+        "threshold": 0.7,
+        "interval": 1.0
+      }
+    ],
+
+    "switch_role_3": [
+      { "use_macro": "change_role" },
+
+      {
+        "action": "wait_and_click",
+        "template": "option_role3.png",
+        "timeout": 20,
+        "threshold": 0.6
+      },
+
+      { "use_macro": "confirm" },
+      { "use_macro": "return_home" },
+
+      {
+        "action": "wait_for_template",
+        "template": "role3_indicator.png",
+        "timeout": 15,
+        "threshold": 0.7,
+        "interval": 1.0
+      }
+    ],
+
+    "switch_role_4": [
+      { "use_macro": "change_role" },
+
+      {
+        "action": "wait_and_click",
+        "template": "option_role4.png",
+        "timeout": 20,
+        "threshold": 0.6
+      },
+
+      { "use_macro": "confirm" },
+      { "use_macro": "return_home" },
+
+      {
+        "action": "wait_for_template",
+        "template": "role4_indicator.png",
+        "timeout": 15,
+        "threshold": 0.7,
+        "interval": 1.0
+      }
+    ],
+
+    "switch_role_5": [
+      { "use_macro": "change_role" },
+
+      {
+        "action": "wait_and_click",
+        "template": "option_role5.png",
+        "timeout": 20,
+        "threshold": 0.6
+      },
+
+      { "use_macro": "confirm" },
+      { "use_macro": "return_home" },
+
+      {
+        "action": "wait_for_template",
+        "template": "role5_indicator.png",
+        "timeout": 15,
+        "threshold": 0.7,
+        "interval": 1.0
+      }
+    ]
+
+  }
+
+}

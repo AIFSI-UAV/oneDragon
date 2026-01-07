@@ -1,0 +1,155 @@
+{
+  "adb_path": "D:/leidian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+  "templates_dir": "templates/Teamdaily",
+
+    "macros": {
+    "return_to_main": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home.png",
+        "timeout": 10
+      }
+    ],
+
+    "open_menu": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_menu.png",
+        "timeout": 10,
+        "threshold": 0.6
+      }
+    ],
+
+    "team_full": [
+      {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Maximum.png",
+        "timeout": 20
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20
+      }
+    ],
+
+    "exit_after_battle": [
+      {
+        "action": "wait_and_click_loop",
+        "template": "Leave.png",
+        "per_timeout": 60,
+        "threshold": 0.8,
+        "max_wait": 600,
+        "click_times": 2,
+        "ensure_disappeared": true,
+        "verify_timeout": 10,
+        "verify_interval": 1.0
+      }
+    ]
+
+  },
+
+  "tasks": [
+    {
+      "name": "boss_bingwang",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "bingwang.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        { "use_macro": "team_full" },
+        { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+      "name": "boss_pyramid",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "Pyramid.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        { "use_macro": "team_full" },
+        { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+      "name": "boss_eliteBoss",
+      "steps": [
+        { "use_macro": "open_menu" },
+
+        {
+          "action": "wait_and_click",
+          "template": "EliteBoss.png",
+          "timeout": 20,
+          "threshold": 0.5
+        },
+
+        {
+          "action": "wait_and_click_yes",
+          "primary_template": "elite_help.png",
+          "fallback_template": "quiet_help.png",
+          "primary_timeout": 3,
+          "fallback_timeout": 20,
+          "threshold": 0.7,
+          "click_times": 1
+        },
+
+        {
+          "action": "sleep",
+          "seconds": 1
+        },
+
+        { "use_macro": "team_full" },
+
+        {
+          "action": "wait_and_click_loop",
+          "template": "buy_box.png",
+          "per_timeout": 60,
+          "threshold": 0.8,
+          "max_wait": 600,
+          "click_times": 2,
+          "ensure_disappeared": true,
+          "verify_timeout": 10,
+          "verify_interval": 1.0
+        },
+
+        {
+          "action": "wait_and_click",
+          "template": "buy_confirm.png",
+          "timeout": 20,
+          "threshold": 0.7
+        },
+
+        {
+          "action": "wait_and_click_loop",
+          "template": "Leave.png",
+          "per_timeout": 20,
+          "threshold": 0.8,
+          "max_wait": 600,
+          "click_times": 2,
+          "ensure_disappeared": true,
+          "verify_timeout": 10,
+          "verify_interval": 1.0
+        }
+      ]
+    }
+  ]
+}

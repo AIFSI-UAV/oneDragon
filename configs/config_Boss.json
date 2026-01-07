@@ -1,0 +1,122 @@
+{
+  "adb_path": "D:/leidian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+  "templates_dir": "templates/Boss",
+
+  "macros": {
+    "return_to_main": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_home.png",
+        "timeout": 8
+      },
+      {
+        "action": "sleep",
+        "seconds": 2
+      }
+    ],
+
+    "open_menu": [
+      {
+        "action": "wait_and_click",
+        "template": "btn_menu.png",
+        "timeout": 20
+      },
+      {
+        "action": "sleep",
+        "seconds": 2
+      }
+    ],
+
+    "open_team_daily_tab": [
+      {
+        "action": "wait_and_click",
+        "template": "tab_daily.png",
+        "timeout": 20
+      },
+      {
+        "action": "wait_and_click",
+        "template": "tab_teamdaily.png",
+        "timeout": 20
+      },
+      {
+        "action": "sleep",
+        "seconds": 2
+      }
+    ],
+
+    "team_full": [
+      {
+        "action": "wait_and_click",
+        "template": "Team.png",
+        "timeout": 20
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Maximum.png",
+        "timeout": 20
+      },
+      {
+        "action": "wait_and_click",
+        "template": "Confirm.png",
+        "timeout": 20
+      }
+    ],
+
+    "exit_after_battle": [
+      {
+        "action": "wait_and_click_loop",
+        "template": "Leave.png",
+        "per_timeout": 60,
+        "threshold": 0.8,
+        "max_wait": 0
+      }
+    ]
+  },
+
+  "tasks": [
+    {
+      "name": "team_daily_1",
+      "steps": [
+        { "use_macro": "open_menu" },
+        { "use_macro": "open_team_daily_tab" },
+
+        {
+          "action": "wait_and_click",
+          "template": "daily_team_1.png",
+          "timeout": 20,
+          "threshold": 0.8
+        },
+        {
+          "action": "sleep",
+          "seconds": 2
+        },
+
+        { "use_macro": "team_full" },
+        { "use_macro": "exit_after_battle" }
+      ]
+    },
+
+    {
+      "name": "team_daily_2",
+      "steps": [
+        { "use_macro": "open_menu" },
+        { "use_macro": "open_team_daily_tab" },
+
+        {
+          "action": "wait_and_click",
+          "template": "daily_team_2.png",
+          "timeout": 20,
+          "threshold": 0.8
+        },
+        {
+          "action": "sleep",
+          "seconds": 2
+        },
+
+        { "use_macro": "team_full" },
+        { "use_macro": "exit_after_battle" }
+      ]
+    }
+  ]
+}

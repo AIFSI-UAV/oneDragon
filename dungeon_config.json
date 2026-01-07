@@ -1,0 +1,31 @@
+{
+  "adb_path": "D:/LeiDian/LDPlayer9/adb.exe",
+  "device": "127.0.0.1:5555",
+
+  "tasks": [
+    {
+      "name": "simple_demo_flow",
+      "steps": [
+        {
+          "action": "wait_and_click",
+          "template": "btn_menu.png",
+          "timeout": 20
+        },
+        {
+          "action": "wait_and_click",
+          "template": "btn_start.png",
+          "timeout": 20
+        },
+        {
+          "action": "sleep",
+          "seconds": 10
+        },
+        {
+          "action": "wait_and_click",
+          "template": "btn_ok.png",
+          "timeout": 20
+        }
+      ]
+    }
+  ]
+}

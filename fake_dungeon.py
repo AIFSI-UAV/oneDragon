@@ -131,6 +131,33 @@ class TemplateMatcher:
         self._template_cache[template_path] = gray_template
         return gray_template
 
+        # ★ 新增：统一处理 ROI 的辅助函数
+
+    @staticmethod
+    def _apply_roi(gray_screen, roi):
+        """
+        roi: [x1, y1, x2, y2] 或 None
+        返回: (gray_region, offset_x, offset_y)
+        """
+        if roi is None:
+            return gray_screen, 0, 0
+
+        h, w = gray_screen.shape[:2]
+        x1, y1, x2, y2 = roi
+
+        # 边界截断，防止越界
+        x1 = max(0, min(w, x1))
+        x2 = max(0, min(w, x2))
+        y1 = max(0, min(h, y1))
+        y2 = max(0, min(h, y2))
+
+        if x2 <= x1 or y2 <= y1:
+            # ROI 非法时，退化为整图
+            return gray_screen, 0, 0
+
+        region = gray_screen[y1:y2, x1:x2]
+        return region, x1, y1
+
     # ---------------- 灰度截图上的匹配核心 ----------------
 
     def _find_template_in_gray(self, gray_screen, template_name, threshold=0.8):
@@ -163,13 +190,46 @@ class TemplateMatcher:
 
     # ---------------- 单模板匹配（兼容旧接口） ----------------
 
-    def find_template_in_image(self, image, template_name, threshold=0.8):
+    # def find_template_in_image(self, image, template_name, threshold=0.8):
+    #     """
+    #     在给定彩色 image 中查找单个模板 template_name，返回中心坐标或 None。
+    #     注意：内部会把 image 转灰度后调用 _find_template_in_gray。
+    #     """
+    #     gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    #     return self._find_template_in_gray(gray_screen, template_name, threshold)
+    def find_template_in_image(self, gray_screen, template_name, threshold=0.8, roi=None):
         """
-        在给定彩色 image 中查找单个模板 template_name，返回中心坐标或 None。
-        注意：内部会把 image 转灰度后调用 _find_template_in_gray。
+        gray_screen: 整屏的灰度图（已经转换好的）
+        roi: [x1, y1, x2, y2]，只在该区域内做匹配；为 None 则全屏。
         """
-        gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return self._find_template_in_gray(gray_screen, template_name, threshold)
+        template_path = os.path.join(self.templates_dir, template_name)
+        template = cv2.imread(template_path)
+        if template is None:
+            print(f"[模板缺失] {template_path}")
+            return None
+
+        # 模板统一灰度
+        gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+
+        # ★ 先对 screen 应用 ROI
+        region, offset_x, offset_y = self._apply_roi(gray_screen, roi)
+
+        # 尺寸检查：ROI 区域必须要比模板大
+        if (region.shape[0] < gray_template.shape[0] or
+                region.shape[1] < gray_template.shape[1]):
+            print(f"[模板尺寸异常] {template_name} 在 ROI 内无效")
+            return None
+
+        result = cv2.matchTemplate(region, gray_template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= threshold:
+            h, w = gray_template.shape
+            cx = max_loc[0] + w // 2 + offset_x
+            cy = max_loc[1] + h // 2 + offset_y
+            return cx, cy
+
+        return None
 
     def wait_and_click(self, adb: "ADBDevice", template_name,
                        timeout=30, interval=1.0, threshold=0.8,

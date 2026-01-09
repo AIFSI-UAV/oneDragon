@@ -677,79 +677,83 @@ class DungeonAutomation:
 
     def _handle_wait_and_click_yes(self, step, log_func, stop_flag) -> bool:
         """
-        逻辑：'YES' 版条件点击
+        逻辑：IF 版条件点击（“出现就点 YES”）
 
         - 如果在 primary_timeout 内检测到 primary_template：
-            -> 在 fallback_timeout 内点击 fallback_template（可以多次）
-        - 如果 primary_timeout 内 *没有* 检测到 primary_template：
-            -> 安静跳过本步骤（返回 True），不算任务失败
+            -> 再在 fallback_timeout 内点击 fallback_template
+        - 如果 primary_template 没出现：
+            -> 安静跳过本步骤（不算失败）
 
         配置字段：
-          - primary_template: str  必选
-          - fallback_template: str 必选
+          - primary_template: str  必选（主触发图）
+          - fallback_template: str 必选（真正要点击的图）
           - primary_timeout: float 检测 primary 的时间窗（秒）
           - fallback_timeout: float 检测 + 点击 fallback 的时间窗（秒）
           - threshold: float 匹配阈值
           - click_times: int 点击次数
           - ignore_fallback_fail: bool (可选)
-          - primary_roi / fallback_roi: [x1,y1,x2,y2] (可选)
+                True  -> fallback 点不到也不当成任务失败，只记日志
+                False -> fallback 点不到当成失败 + try_return_home
         """
-        primary = step.get("primary_template")
-        fallback = step.get("fallback_template")
-        pt = step.get("primary_timeout", 3)
-        ft = step.get("fallback_timeout", 20)
-        thr = step.get("threshold", 0.8)
-        clicks = step.get("click_times", 1)
-        ignore_fallback_fail = step.get("ignore_fallback_fail", False)
-        primary_roi = step.get("primary_roi")
-        fallback_roi = step.get("fallback_roi")
-        roi = step.get("roi")  # ★ 新增
+        primary_tpl = step.get("primary_template")
+        fallback_tpl = step.get("fallback_template")
+        primary_timeout = step.get("primary_timeout", 3)
+        fallback_timeout = step.get("fallback_timeout", 20)
+        threshold = step.get("threshold", 0.8)
+        click_times = step.get("click_times", 1)
+        ignore_fail = step.get("ignore_fallback_fail", False)
 
-        if not primary or not fallback:
-            log_func(f"[wait_and_click_yes] primary_template 或 fallback_template 缺失: "
-                     f"primary={primary}, fallback={fallback}，跳过本步骤")
+        if not primary_tpl or not fallback_tpl:
+            log_func(
+                f"[wait_and_click_yes] primary_template 或 fallback_template 缺失: "
+                f"primary={primary_tpl}, fallback={fallback_tpl}，跳过本步骤"
+            )
             return True
 
         log_func(
-            f"wait_and_click_yes: 如检测到 {primary} 则点击 {fallback}，"
-            f"primary_timeout={pt}, fallback_timeout={ft}"
+            f"wait_and_click_yes: 如检测到 {primary_tpl} 则点击 {fallback_tpl}，"
+            f"primary_timeout={primary_timeout}, fallback_timeout={fallback_timeout}"
         )
 
         # 1）先只检测 primary_template，不点击
         yes = self.matcher.wait_for_template(
             self.adb,
-            primary,
-            timeout=pt,
-            threshold=thr,
-            roi=primary_roi,
+            primary_tpl,
+            timeout=primary_timeout,
+            threshold=threshold,
         )
         if not yes:
-            log_func(f"未在 {pt}s 内检测到 {primary}，跳过本步骤")
+            # 没检测到 primary，安静跳过本 step，不算失败
+            log_func(f"未在 {primary_timeout}s 内检测到 {primary_tpl}，跳过本步骤")
             return True
 
         # 2）检测到 primary，再去点击 fallback_template
-        log_func(f"检测到 {primary}，尝试点击 {fallback}")
+        log_func(f"检测到 {primary_tpl}，尝试点击 {fallback_tpl}")
         ok_fallback = self.matcher.wait_and_click(
             self.adb,
-            fallback,
-            timeout=ft,
-            threshold=thr,
-            click_times=clicks,
-            roi=roi,  # ★ 传 ROI
+            fallback_tpl,
+            timeout=fallback_timeout,
+            threshold=threshold,
+            click_times=click_times,
         )
 
         if not ok_fallback:
-            if ignore_fallback_fail:
+            if ignore_fail:
                 log_func(
-                    f"检测到 {primary}，但在 {ft}s 内未成功点击 {fallback}；"
-                    f"ignore_fallback_fail=True，跳过本步，继续后续任务"
+                    f"检测到 {primary_tpl}，但在 {fallback_timeout}s 内未成功点击 "
+                    f"{fallback_tpl}；ignore_fallback_fail=True，跳过本步，继续后续任务"
                 )
                 return True
             else:
-                log_func(f"检测到 {primary} 但点击 {fallback} 失败，任务提前结束")
+                log_func(
+                    f"检测到 {primary_tpl} 但点击 {fallback_tpl} 失败，任务提前结束"
+                )
                 self.try_return_home(log_func=log_func, stop_flag=stop_flag)
                 return False
 
+        log_func(
+            f"检测到 {primary_tpl}，已成功点击 {fallback_tpl}（{click_times} 次）"
+        )
         return True
 
     def _handle_wait_and_click_no(self, step, log_func, stop_flag) -> bool:
@@ -1222,7 +1226,9 @@ def debug_find_template(config_path: str, template_name: str, threshold: float =
         print("[DEBUG] 读取截图失败")
         return
 
-    pos = auto.matcher.find_template_in_image(img, template_name, threshold=threshold)
+    # 转灰度，然后走统一的灰度匹配接口
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    pos = auto.matcher._find_template_in_gray(gray, template_name, threshold=threshold)
     print(f"[DEBUG] 模板 {template_name} 匹配结果:", pos)
 
 if __name__ == "__main__":

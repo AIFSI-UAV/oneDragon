@@ -371,6 +371,7 @@ class DungeonAutomation:
             "wait_and_click_loop": self._handle_wait_and_click_loop,
             "wait_and_click_or":  self._handle_wait_and_click_or,
             "wait_and_click_yes": self._handle_wait_and_click_yes,
+            "wait_and_click_no": self._handle_wait_and_click_no,  # ★ 新增
             "wait_and_click_any": self._handle_wait_and_click_any,
             "click_while_exists": self._handle_click_while_exists,
             "click_any_while_exists": self._handle_click_any_while_exists,
@@ -680,6 +681,92 @@ class DungeonAutomation:
                 self.try_return_home(log_func=log_func, stop_flag=stop_flag)
                 return False
 
+        return True
+
+    def _handle_wait_and_click_no(self, step, log_func, stop_flag) -> bool:
+        """
+        逻辑：'NO' 版条件点击
+
+        - 如果在 primary_timeout 内检测到 primary_template：
+            -> 什么都不点，直接跳过本步骤（返回 True）
+        - 如果在 primary_timeout 内 *没有* 检测到 primary_template：
+            -> 在 fallback_timeout 内等待并点击 fallback_template
+
+        配置字段：
+          - primary_template: str  必选
+          - fallback_template: str 必选
+          - primary_timeout: float 检测 primary 的时间窗（秒）
+          - fallback_timeout: float 检测 + 点击 fallback 的时间窗（秒）
+          - threshold: float 匹配阈值
+          - click_times: int 点击次数
+          - ignore_fallback_fail: bool (可选)
+                True  -> fallback 点不到也不当成任务失败，只记日志
+                False -> fallback 点不到当成失败 + try_return_home
+        """
+        primary  = step.get("primary_template")
+        fallback = step.get("fallback_template")
+        pt       = step.get("primary_timeout", 3)
+        ft       = step.get("fallback_timeout", 20)
+        thr      = step.get("threshold", 0.8)
+        clicks   = step.get("click_times", 1)
+        ignore_fallback_fail = step.get("ignore_fallback_fail", False)
+
+        if not primary or not fallback:
+            log_func(f"[wait_and_click_no] primary_template 或 fallback_template 缺失: "
+                     f"primary={primary}, fallback={fallback}，跳过本步骤")
+            return True
+
+        log_func(
+            f"wait_and_click_no: 如检测到 {primary} 则跳过；"
+            f"若 {primary} 未出现则点击 {fallback}，"
+            f"primary_timeout={pt}, fallback_timeout={ft}"
+        )
+
+        # 1) 先在 primary_timeout 内“只检测，不点击” primary
+        ok_primary = self.matcher.wait_for_template(
+            self.adb,
+            primary,
+            timeout=pt,
+            threshold=thr,
+        )
+
+        if ok_primary:
+            # 检测到 primary -> 本步骤什么都不做，直接结束
+            log_func(
+                f"[wait_and_click_no] 检测到 {primary}，按逻辑跳过点击 {fallback}，本步骤结束"
+            )
+            return True
+
+        log_func(
+            f"[wait_and_click_no] 在 {pt}s 内未检测到 {primary}，尝试点击 {fallback}"
+        )
+
+        # 2) primary 不存在 -> 在 fallback_timeout 内去点 fallback
+        ok_fallback = self.matcher.wait_and_click(
+            self.adb,
+            fallback,
+            timeout=ft,
+            threshold=thr,
+            click_times=clicks,
+        )
+
+        if not ok_fallback:
+            if ignore_fallback_fail:
+                log_func(
+                    f"[wait_and_click_no] {primary} 未出现，但在 {ft}s 内未成功点击 "
+                    f"{fallback}；ignore_fallback_fail=True，忽略此失败继续后续任务"
+                )
+                return True
+            else:
+                log_func(
+                    f"[wait_and_click_no] {primary} 未出现，且点击 {fallback} 失败，任务提前结束"
+                )
+                self.try_return_home(log_func=log_func, stop_flag=stop_flag)
+                return False
+
+        log_func(
+            f"[wait_and_click_no] {primary} 未出现，已成功点击 {fallback}（{clicks} 次）"
+        )
         return True
 
     def _handle_wait_and_click_any(self, step, log_func, stop_flag) -> bool:

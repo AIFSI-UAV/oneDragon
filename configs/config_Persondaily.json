@@ -234,10 +234,14 @@
         "threshold": 0.7
       },
       {
-        "action": "wait_and_click",
-        "template": "buy_experience.png",
-        "timeout": 20,
-        "threshold": 0.7
+        "action": "wait_and_click_no",
+        "primary_template": "buy_experiences.png.png",
+        "fallback_template": "buy_experience.png.png",
+        "primary_timeout": 3,
+        "fallback_timeout": 20,
+        "threshold": 0.7,
+        "click_times": 1,
+        "ignore_fallback_fail": true
       },
       {
         "action": "sleep",

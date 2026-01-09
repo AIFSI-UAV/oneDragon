@@ -83,6 +83,15 @@
       "steps": [
         {
           "action": "click_any_while_exists",
+          "templates": ["get_prize.png", "get_confirm.png"],
+          "per_timeout": 5,
+          "threshold": 0.7,
+          "click_times": 1,
+          "max_clicks": 10,
+          "max_duration": 30
+        },
+        {
+          "action": "click_any_while_exists",
           "templates": ["get_allprize.png", "get_confirm.png"],
           "per_timeout": 5,
           "threshold": 0.7,
@@ -107,6 +116,15 @@
         {
           "action": "click_any_while_exists",
           "templates": ["get_prize.png", "get_confirm.png"],
+          "per_timeout": 5,
+          "threshold": 0.7,
+          "click_times": 1,
+          "max_clicks": 10,
+          "max_duration": 30
+        },
+        {
+          "action": "click_any_while_exists",
+          "templates": ["get_allprize.png", "get_confirm.png"],
           "per_timeout": 5,
           "threshold": 0.7,
           "click_times": 1,
@@ -139,8 +157,28 @@
           "threshold": 0.5
         },
         { "use_macro": "return_to_main" }
-
              ]
+      },
+    {
+      "name": "get_autotime",
+      "steps": [
+        {
+          "action": "wait_and_click_any",
+          "templates": ["auto_play.png", "auto.png"],
+          "timeout": 20,
+          "threshold": 0.5,
+          "click_times": 1
+        },
+        {
+          "action": "click_while_exists",
+          "template": "autotime_used.png",
+          "per_timeout": 2,
+          "threshold": 0.7,
+          "click_times": 1,
+          "max_clicks": 2,
+          "max_duration": 10
+        }
+                ]
     }
-  ]
+          ]
 }

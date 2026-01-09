@@ -90,7 +90,7 @@ class ADBDevice:
 # ========= 眼睛：TemplateMatcher =========
 
 class TemplateMatcher:
-    """基于 OpenCV 的模板匹配 + 模板缓存 + 灰度截图复用"""
+    """基于 OpenCV 的模板匹配 + 模板缓存 + 灰度截图复用 + 可选 ROI"""
 
     def __init__(self, templates_dir="templates", screenshot_dir="screenshots"):
         # 基于 fake_dungeon.py 文件所在目录，构造绝对路径
@@ -103,11 +103,10 @@ class TemplateMatcher:
         os.makedirs(self.templates_dir, exist_ok=True)
         os.makedirs(self.screenshot_dir, exist_ok=True)
 
-        # ★ 模板缓存：key 用模板的绝对路径，value 是灰度模板 ndarray
-        #   { "D:/.../templates/xxx.png": gray_template_ndarray }
+        # 模板缓存：key=模板绝对路径, value=灰度模板 ndarray
         self._template_cache = {}
 
-    # ---------------- 模板缓存核心方法 ----------------
+    # ---------------- 模板缓存 ----------------
 
     def _get_gray_template(self, template_name: str):
         """
@@ -131,7 +130,7 @@ class TemplateMatcher:
         self._template_cache[template_path] = gray_template
         return gray_template
 
-        # ★ 新增：统一处理 ROI 的辅助函数
+    # ---------------- ROI 工具 ----------------
 
     @staticmethod
     def _apply_roi(gray_screen, roi):
@@ -160,61 +159,22 @@ class TemplateMatcher:
 
     # ---------------- 灰度截图上的匹配核心 ----------------
 
-    def _find_template_in_gray(self, gray_screen, template_name, threshold=0.8):
+    def _find_template_in_gray(self, gray_screen, template_name,
+                               threshold=0.8, roi=None):
         """
-        在灰度截图 gray_screen 中匹配单个模板。
-        gray_screen: 单通道灰度图 (ndarray)
+        在灰度截图 gray_screen 中匹配单个模板，可选 ROI。
+        gray_screen: 单通道灰度图
+        roi: [x1, y1, x2, y2] 或 None
         返回 (cx, cy) 或 None
         """
         gray_template = self._get_gray_template(template_name)
         if gray_template is None:
-            # 已在 _get_gray_template 打印了缺失信息
             return None
 
-        # 基本尺寸检查
-        if (gray_screen.shape[0] < gray_template.shape[0] or
-                gray_screen.shape[1] < gray_template.shape[1]):
-            print(f"[模板尺寸异常] {template_name}")
-            return None
-
-        result = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-        if max_val >= threshold:
-            h, w = gray_template.shape
-            cx = max_loc[0] + w // 2
-            cy = max_loc[1] + h // 2
-            return cx, cy
-
-        return None
-
-    # ---------------- 单模板匹配（兼容旧接口） ----------------
-
-    # def find_template_in_image(self, image, template_name, threshold=0.8):
-    #     """
-    #     在给定彩色 image 中查找单个模板 template_name，返回中心坐标或 None。
-    #     注意：内部会把 image 转灰度后调用 _find_template_in_gray。
-    #     """
-    #     gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    #     return self._find_template_in_gray(gray_screen, template_name, threshold)
-    def find_template_in_image(self, gray_screen, template_name, threshold=0.8, roi=None):
-        """
-        gray_screen: 整屏的灰度图（已经转换好的）
-        roi: [x1, y1, x2, y2]，只在该区域内做匹配；为 None 则全屏。
-        """
-        template_path = os.path.join(self.templates_dir, template_name)
-        template = cv2.imread(template_path)
-        if template is None:
-            print(f"[模板缺失] {template_path}")
-            return None
-
-        # 模板统一灰度
-        gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-
-        # ★ 先对 screen 应用 ROI
+        # 对屏幕应用 ROI
         region, offset_x, offset_y = self._apply_roi(gray_screen, roi)
 
-        # 尺寸检查：ROI 区域必须要比模板大
+        # 尺寸检查
         if (region.shape[0] < gray_template.shape[0] or
                 region.shape[1] < gray_template.shape[1]):
             print(f"[模板尺寸异常] {template_name} 在 ROI 内无效")
@@ -231,13 +191,28 @@ class TemplateMatcher:
 
         return None
 
+    # ---------------- 兼容老接口：彩色图直接匹配 ----------------
+
+    def find_template_in_image(self, image, template_name,
+                               threshold=0.8, roi=None):
+        """
+        在给定彩色 image 中查找单个模板 template_name，返回中心坐标或 None。
+        内部会把 image 转灰度后调用 _find_template_in_gray。
+        主要给 debug_find_template 用。
+        """
+        gray_screen = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return self._find_template_in_gray(
+            gray_screen, template_name, threshold, roi=roi
+        )
+
+    # ---------------- wait_and_click：支持 ROI ----------------
+
     def wait_and_click(self, adb: "ADBDevice", template_name,
                        timeout=30, interval=1.0, threshold=0.8,
-                       click_times: int = 1):
+                       click_times: int = 1, roi=None) -> bool:
         """
         常用模式：等待某个模板出现，然后点击（可多次点击）。
         返回 True 表示点击成功，False 表示超时未检测到。
-        ★ 每轮截图只转一次灰度，后面匹配都在灰度图上完成。
         """
         start = time.time()
         shot_path = os.path.join(self.screenshot_dir, "screen.png")
@@ -252,9 +227,10 @@ class TemplateMatcher:
                 time.sleep(interval)
                 continue
 
-            # 一次性转灰度
             gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            pos = self._find_template_in_gray(gray_screen, template_name, threshold)
+            pos = self._find_template_in_gray(
+                gray_screen, template_name, threshold, roi=roi
+            )
             if pos:
                 print(f"[wait_and_click] {template_name} at {pos}, click_times={click_times}")
                 for _ in range(max(1, click_times)):
@@ -266,7 +242,7 @@ class TemplateMatcher:
         print(f"[wait_and_click] 等待 {template_name} 超时({timeout}s)")
         return False
 
-    # ---------------- 只检测不点击 ----------------
+    # ---------------- wait_for_template：支持 ROI ----------------
 
     def wait_for_template(
         self,
@@ -275,12 +251,12 @@ class TemplateMatcher:
         timeout: float = 30,
         interval: float = 1.0,
         threshold: float = 0.8,
+        roi=None,
     ) -> bool:
         """
         只等待某个模板出现，不点击。
         - 返回 True: 在 timeout 内检测到 template_name
         - 返回 False: 超时仍未检测到
-        ★ 每轮截图只转一次灰度。
         """
         start = time.time()
         shot_path = os.path.join(self.screenshot_dir, "wait_only.png")
@@ -296,7 +272,9 @@ class TemplateMatcher:
                 continue
 
             gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            pos = self._find_template_in_gray(gray_screen, template_name, threshold)
+            pos = self._find_template_in_gray(
+                gray_screen, template_name, threshold, roi=roi
+            )
             if pos:
                 print(f"[wait_for_template] 检测到 {template_name} at {pos}")
                 return True
@@ -306,7 +284,7 @@ class TemplateMatcher:
         print(f"[wait_for_template] 等待 {template_name} 超时({timeout}s)")
         return False
 
-    # ---------------- 多模板：命中任意一个就点击 ----------------
+    # ---------------- 多模板：命中任意一个就点击（支持 ROI） ----------------
 
     def wait_and_click_any(
         self,
@@ -316,15 +294,12 @@ class TemplateMatcher:
         interval: float = 1.0,
         threshold: float = 0.8,
         click_times: int = 1,
+        roi=None,
     ):
         """
         在给定的 templates 列表中，谁先匹配成功就点谁。
-        返回 (ok, hit_template_name)：
-        - ok = True  时，hit_template_name 为匹配成功的模板名字；
-        - ok = False 时，hit_template_name = None。
-        ★ 一张截图只转一次灰度，在同一张灰度图上遍历所有模板。
+        返回 (ok, hit_template_name)
         """
-        # 防御：templates 必须是非空列表
         if not templates or not isinstance(templates, list):
             print(f"[wait_and_click_any] 非法的 templates 参数: {templates}")
             return False, None
@@ -342,8 +317,8 @@ class TemplateMatcher:
                 time.sleep(interval)
                 continue
 
-            # 一次性转灰度
             gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            region, offset_x, offset_y = self._apply_roi(gray_screen, roi)
 
             best_name = None
             best_pos = None
@@ -351,18 +326,19 @@ class TemplateMatcher:
             best_w = 0
             best_h = 0
 
-            # 在同一张灰度图上，遍历所有模板，找匹配度最高的那个
             for name in templates:
                 gray_template = self._get_gray_template(name)
                 if gray_template is None:
                     continue
 
                 h, w = gray_template.shape
-                if gray_screen.shape[0] < h or gray_screen.shape[1] < w:
-                    print(f"[模板尺寸异常] {name}")
+                if region.shape[0] < h or region.shape[1] < w:
+                    print(f"[模板尺寸异常] {name} 在 ROI 内无效")
                     continue
 
-                result = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
+                result = cv2.matchTemplate(
+                    region, gray_template, cv2.TM_CCOEFF_NORMED
+                )
                 _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
                 if max_val > best_val:
@@ -373,8 +349,8 @@ class TemplateMatcher:
                     best_h = h
 
             if best_name is not None and best_val >= threshold:
-                cx = best_pos[0] + best_w // 2
-                cy = best_pos[1] + best_h // 2
+                cx = best_pos[0] + best_w // 2 + offset_x
+                cy = best_pos[1] + best_h // 2 + offset_y
                 print(
                     f"[wait_and_click_any] 命中 {best_name} at ({cx}, {cy}), "
                     f"score={best_val:.3f}, click_times={click_times}"
@@ -589,6 +565,7 @@ class DungeonAutomation:
         timeout = step.get("timeout", 30)
         threshold = step.get("threshold", 0.8)
         click_times = step.get("click_times", 1)
+        roi = step.get("roi")  # ★ 新增
 
         ok = self.matcher.wait_and_click(
             self.adb,
@@ -596,6 +573,7 @@ class DungeonAutomation:
             timeout=timeout,
             threshold=threshold,
             click_times=click_times,
+            roi=roi,  # ★ 传 ROI
         )
         if not ok:
             log_func(f"等待并点击 {tpl} 失败，任务提前结束")
@@ -615,6 +593,7 @@ class DungeonAutomation:
         threshold = step.get("threshold", 0.8)
         max_wait = step.get("max_wait", 0)        # 总等待上限（秒），0 表示无限等待
         click_times = step.get("click_times", 1)  # 每次检测到时点击次数
+        roi = step.get("roi")  # ★ 新增
 
         start_all = time.time()
         log_func(
@@ -633,6 +612,7 @@ class DungeonAutomation:
                 timeout=per_timeout,
                 threshold=threshold,
                 click_times=click_times,
+                roi=roi,  # ★ 传 ROI
             )
             if ok:
                 log_func(f"循环等待中检测到 {tpl}，已点击 {click_times} 次")
@@ -656,6 +636,7 @@ class DungeonAutomation:
         click_times = step.get("click_times", 1)
         primary_timeout = step.get("primary_timeout", 3)
         fallback_timeout = step.get("fallback_timeout", 20)
+        roi = step.get("roi")  # ★ 新增
 
         log_func(
             f"wait_and_click_or: 优先尝试 {primary_tpl}({primary_timeout}s)，"
@@ -669,6 +650,7 @@ class DungeonAutomation:
             timeout=primary_timeout,
             threshold=threshold,
             click_times=click_times,
+            roi=roi,  # ★ 传 ROI
         )
         if ok_primary:
             log_func(f"优先模板 {primary_tpl} 点击成功")
@@ -681,6 +663,7 @@ class DungeonAutomation:
             timeout=fallback_timeout,
             threshold=threshold,
             click_times=click_times,
+            roi=roi,  # ★ 传 ROI
         )
         if not ok_fallback:
             log_func(
@@ -693,12 +676,39 @@ class DungeonAutomation:
         return True
 
     def _handle_wait_and_click_yes(self, step, log_func, stop_flag) -> bool:
-        primary_tpl = step["primary_template"]
-        fallback_tpl = step["fallback_template"]
-        primary_timeout = step.get("primary_timeout", 3)   # 检测 primary 的时间
+        """
+        逻辑：IF 版条件点击（“出现就点 YES”）
+
+        - 如果在 primary_timeout 内检测到 primary_template：
+            -> 再在 fallback_timeout 内点击 fallback_template
+        - 如果 primary_template 没出现：
+            -> 安静跳过本步骤（不算失败）
+
+        配置字段：
+          - primary_template: str  必选（主触发图）
+          - fallback_template: str 必选（真正要点击的图）
+          - primary_timeout: float 检测 primary 的时间窗（秒）
+          - fallback_timeout: float 检测 + 点击 fallback 的时间窗（秒）
+          - threshold: float 匹配阈值
+          - click_times: int 点击次数
+          - ignore_fallback_fail: bool (可选)
+                True  -> fallback 点不到也不当成任务失败，只记日志
+                False -> fallback 点不到当成失败 + try_return_home
+        """
+        primary_tpl = step.get("primary_template")
+        fallback_tpl = step.get("fallback_template")
+        primary_timeout = step.get("primary_timeout", 3)
         fallback_timeout = step.get("fallback_timeout", 20)
         threshold = step.get("threshold", 0.8)
         click_times = step.get("click_times", 1)
+        ignore_fail = step.get("ignore_fallback_fail", False)
+
+        if not primary_tpl or not fallback_tpl:
+            log_func(
+                f"[wait_and_click_yes] primary_template 或 fallback_template 缺失: "
+                f"primary={primary_tpl}, fallback={fallback_tpl}，跳过本步骤"
+            )
+            return True
 
         log_func(
             f"wait_and_click_yes: 如检测到 {primary_tpl} 则点击 {fallback_tpl}，"
@@ -721,26 +731,29 @@ class DungeonAutomation:
         log_func(f"检测到 {primary_tpl}，尝试点击 {fallback_tpl}")
         ok_fallback = self.matcher.wait_and_click(
             self.adb,
-            fallback,
-            timeout=ft,
-            threshold=thr,
-            click_times=clicks,
+            fallback_tpl,
+            timeout=fallback_timeout,
+            threshold=threshold,
+            click_times=click_times,
         )
-
-        ignore_fail = step.get("ignore_fallback_fail", False)
 
         if not ok_fallback:
             if ignore_fail:
                 log_func(
-                    f"检测到 {primary}，但在 {ft}s 内未成功点击 {fallback}；"
-                    f"ignore_fallback_fail=True，跳过本步，继续后续任务"
+                    f"检测到 {primary_tpl}，但在 {fallback_timeout}s 内未成功点击 "
+                    f"{fallback_tpl}；ignore_fallback_fail=True，跳过本步，继续后续任务"
                 )
-                return True  # 当作“本步做不了就算了”，不终止整个任务
+                return True
             else:
-                log_func(f"检测到 {primary} 但点击 {fallback} 失败，任务提前结束")
+                log_func(
+                    f"检测到 {primary_tpl} 但点击 {fallback_tpl} 失败，任务提前结束"
+                )
                 self.try_return_home(log_func=log_func, stop_flag=stop_flag)
                 return False
 
+        log_func(
+            f"检测到 {primary_tpl}，已成功点击 {fallback_tpl}（{click_times} 次）"
+        )
         return True
 
     def _handle_wait_and_click_no(self, step, log_func, stop_flag) -> bool:
@@ -770,6 +783,7 @@ class DungeonAutomation:
         thr      = step.get("threshold", 0.8)
         clicks   = step.get("click_times", 1)
         ignore_fallback_fail = step.get("ignore_fallback_fail", False)
+        roi = step.get("roi")  # ★ 新增
 
         if not primary or not fallback:
             log_func(f"[wait_and_click_no] primary_template 或 fallback_template 缺失: "
@@ -788,6 +802,7 @@ class DungeonAutomation:
             primary,
             timeout=pt,
             threshold=thr,
+            roi=roi,  # ★ 传 ROI
         )
 
         if ok_primary:
@@ -808,6 +823,8 @@ class DungeonAutomation:
             timeout=ft,
             threshold=thr,
             click_times=clicks,
+            roi=roi,  # ★ 传 ROI
+
         )
 
         if not ok_fallback:
@@ -839,6 +856,7 @@ class DungeonAutomation:
         timeout = step.get("timeout", 30)
         threshold = step.get("threshold", 0.8)
         click_times = step.get("click_times", 1)
+        roi = step.get("roi")  # ★ 新增
 
         ok, hit_tpl = self.matcher.wait_and_click_any(
             self.adb,
@@ -846,6 +864,7 @@ class DungeonAutomation:
             timeout=timeout,
             threshold=threshold,
             click_times=click_times,
+            roi=roi,  # ★ 传 ROI
         )
         if not ok:
             log_func(
@@ -864,6 +883,7 @@ class DungeonAutomation:
         click_times = step.get("click_times", 1)      # 每次找到后点几下
         max_clicks = step.get("max_clicks", 100)      # 总点击上限（防止死循环）
         max_duration = step.get("max_duration", 0)    # 总时间上限，0 = 不限制
+        roi = step.get("roi")  # ★ 新增
 
         start_all = time.time()
         total_clicks = 0
@@ -886,6 +906,7 @@ class DungeonAutomation:
                 timeout=per_timeout,
                 threshold=threshold,
                 click_times=click_times,
+                roi=roi,  # ★ 传 ROI
             )
             if not ok:
                 # 本轮找不到，认为已经没有这个图标了，结束循环
@@ -939,6 +960,7 @@ class DungeonAutomation:
         click_times = step.get("click_times", 1)  # 每次命中后的点击次数
         max_clicks = step.get("max_clicks", 100)  # 总点击上限（防止死循环）
         max_duration = step.get("max_duration", 0)  # 总时间上限，0 = 不限制
+        roi = step.get("roi")  # ★ 新增
 
         start_all = time.time()
         total_clicks = 0
@@ -962,6 +984,7 @@ class DungeonAutomation:
                 timeout=per_timeout,
                 threshold=threshold,
                 click_times=click_times,
+                roi=roi,  # ★ 传 ROI
             )
 
             if not ok:
@@ -1017,6 +1040,7 @@ class DungeonAutomation:
         timeout = step.get("timeout", 15)
         threshold = step.get("threshold", 0.8)
         interval = step.get("interval", 1.0)
+        roi = step.get("roi")  # ★ 新增
 
         log_func(
             f"[wait_for_template] 开始等待模板 {tpl} 出现，"
@@ -1028,6 +1052,7 @@ class DungeonAutomation:
             timeout=timeout,
             interval=interval,
             threshold=threshold,
+            roi=roi,  # ★ 传 ROI
         )
         if not ok:
             log_func(
@@ -1201,7 +1226,9 @@ def debug_find_template(config_path: str, template_name: str, threshold: float =
         print("[DEBUG] 读取截图失败")
         return
 
-    pos = auto.matcher.find_template_in_image(img, template_name, threshold=threshold)
+    # 转灰度，然后走统一的灰度匹配接口
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    pos = auto.matcher._find_template_in_gray(gray, template_name, threshold=threshold)
     print(f"[DEBUG] 模板 {template_name} 匹配结果:", pos)
 
 if __name__ == "__main__":

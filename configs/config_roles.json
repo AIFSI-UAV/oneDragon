@@ -22,7 +22,9 @@
         "action": "wait_and_click",
         "template": "change_role.png",
         "timeout": 20,
-        "threshold": 0.6
+        "threshold": 0.6,
+        "roi": [0.5, 0.0, 1.0, 0.5],
+        "roi_mode": "rel"
       }
     ],
 

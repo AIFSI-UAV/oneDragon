@@ -250,8 +250,60 @@ class TemplateMatcher:
 
         return None
 
-    # ---------------- wait_for_template：支持 ROI ----------------
+    def wait_and_click(
+        self,
+        adb: "ADBDevice",
+        template_name: str,
+        timeout: float = 30,
+        interval: float = 1.0,
+        threshold: float = 0.8,
+        click_times: int = 1,
+        roi=None,
+        roi_mode: str = "abs",
+    ) -> bool:
+        """
+        常用模式：等待某个模板出现，然后点击（可多次点击）。
+        - 支持 ROI / roi_mode
+        - 返回 True 表示点击成功，False 表示超时未检测到
+        """
+        start = time.time()
+        shot_path = os.path.join(self.screenshot_dir, "screen.png")
 
+        while time.time() - start < timeout:
+            if not adb.screenshot(shot_path):
+                time.sleep(interval)
+                continue
+
+            img = cv2.imread(shot_path)
+            if img is None:
+                time.sleep(interval)
+                continue
+
+            gray_screen = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            pos = self._find_template_in_gray(
+                gray_screen,
+                template_name,
+                threshold=threshold,
+                roi=roi,
+                roi_mode=roi_mode,
+            )
+
+            if pos:
+                print(
+                    f"[wait_and_click] {template_name} at {pos}, "
+                    f"click_times={click_times}"
+                )
+                for _ in range(max(1, click_times)):
+                    adb.tap(pos[0], pos[1])
+                return True
+
+            time.sleep(interval)
+
+        print(f"[wait_and_click] 等待 {template_name} 超时({timeout}s)")
+        return False
+
+    # ---------------- wait_for_template：支持 ROI ----------------
     def wait_for_template(
         self,
         adb: "ADBDevice",
@@ -384,7 +436,7 @@ class TemplateMatcher:
 
 class DungeonAutomation:
     """
-    负责读取 dungeon_config.json，
+    负责读取 readm.txt，
     按照 tasks/steps 顺序调用 ADBDevice + TemplateMatcher。
     """
 
@@ -410,6 +462,8 @@ class DungeonAutomation:
         # ★ 把 templates_dir 传给 TemplateMatcher
         self.matcher = TemplateMatcher(templates_dir=templates_dir)
         self.adb.connect()
+
+        self._in_return_home = False
 
         # 2）读取 macros & 预展开 tasks
         self.macros = self.config.get("macros", {})  # 可能没有，就给个空 dict
@@ -511,18 +565,24 @@ class DungeonAutomation:
     # 任务失败后的安全回主界面
     # ----------------------------------------------------------------------
     def try_return_home(self, log_func=print, stop_flag=None):
-        """
-        任务失败时尝试执行 'return_to_main' 宏：
-        - 如果宏不存在，只打印提示
-        - 存在则按宏的 steps 执行
-        """
+        # 如果已经在回主界面流程里，就不要再嵌套调用
+        if self._in_return_home:
+            log_func("当前已经在 'return_to_main' 宏中，忽略再次 try_return_home 调用")
+            return
+
         home_steps = self.macros.get("return_to_main")
         if not home_steps:
             log_func("未配置宏 'return_to_main'，无法自动返回主界面")
             return
 
         log_func("任务失败，执行宏 'return_to_main' 尝试返回主界面")
-        self._run_steps(home_steps, log_func=log_func, stop_flag=stop_flag)
+
+        old_flag = self._in_return_home
+        self._in_return_home = True
+        try:
+            self._run_steps(home_steps, log_func=log_func, stop_flag=stop_flag)
+        finally:
+            self._in_return_home = old_flag
 
     # ----------------------------------------------------------------------
     # 各 action 的 handler（小函数）
@@ -533,7 +593,7 @@ class DungeonAutomation:
         threshold = step.get("threshold", 0.8)
         click_times = step.get("click_times", 1)
         roi = step.get("roi")
-        roi_mode = step.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         ok = self.matcher.wait_and_click(
             self.adb,
@@ -563,7 +623,7 @@ class DungeonAutomation:
         max_wait = step.get("max_wait", 0)        # 总等待上限（秒），0 表示无限等待
         click_times = step.get("click_times", 1)  # 每次检测到时点击次数
         roi = step.get("roi")
-        roi_mode = step.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         start_all = time.time()
         log_func(
@@ -615,6 +675,8 @@ class DungeonAutomation:
         thr = step.get("threshold", 0.8)
         clicks = step.get("click_times", 1)
         ignore_fallback_fail = step.get("ignore_fallback_fail", False)
+        roi = step.get("roi")
+        roi_mode = step.get("roi_mode", "abs")
 
         if not primary or not fallback:
             log_func(f"[conditional_click/{mode}] primary 或 fallback 缺失，跳过本步骤")
@@ -628,7 +690,8 @@ class DungeonAutomation:
 
         # 先检测 primary 是否出现
         has_primary = self.matcher.wait_for_template(
-            self.adb, primary, timeout=pt, threshold=thr
+            self.adb, primary, timeout=pt, threshold=thr,
+            roi = roi, roi_mode = roi_mode
         )
 
         if mode == "or":
@@ -636,12 +699,14 @@ class DungeonAutomation:
             if has_primary:
                 log_func(f"[conditional_click/or] 检测到 {primary}，尝试点击它")
                 ok = self.matcher.wait_and_click(
-                    self.adb, primary, timeout=ft, threshold=thr, click_times=clicks
+                    self.adb, primary, timeout=ft, threshold=thr, click_times=clicks,
+                    roi=roi, roi_mode=roi_mode
                 )
             else:
                 log_func(f"[conditional_click/or] 未检测到 {primary}，尝试点击 {fallback}")
                 ok = self.matcher.wait_and_click(
-                    self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks
+                    self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks,
+                    roi=roi, roi_mode=roi_mode
                 )
 
             if not ok:
@@ -665,7 +730,8 @@ class DungeonAutomation:
                 f"[conditional_click/yes] 检测到 {primary}，尝试点击 {fallback}"
             )
             ok = self.matcher.wait_and_click(
-                self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks
+                self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks,
+                roi = roi, roi_mode = roi_mode
             )
             if not ok:
                 if ignore_fallback_fail:
@@ -690,7 +756,8 @@ class DungeonAutomation:
                 f"[conditional_click/no] 在 {pt}s 内未检测到 {primary}，尝试点击 {fallback}"
             )
             ok = self.matcher.wait_and_click(
-                self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks
+                self.adb, fallback, timeout=ft, threshold=thr, click_times=clicks,
+                roi = roi, roi_mode = roi_mode
             )
             if not ok:
                 if ignore_fallback_fail:
@@ -728,7 +795,7 @@ class DungeonAutomation:
         threshold = step.get("threshold", 0.8)
         click_times = step.get("click_times", 1)
         roi = step.get("roi")
-        roi_mode = step.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         ok, hit_tpl = self.matcher.wait_and_click_any(
             self.adb,
@@ -757,7 +824,7 @@ class DungeonAutomation:
         max_clicks = step.get("max_clicks", 100)      # 总点击上限（防止死循环）
         max_duration = step.get("max_duration", 0)    # 总时间上限，0 = 不限制
         roi = step.get("roi")  # ★ 新增
-        roi_mode = step.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         start_all = time.time()
         total_clicks = 0
@@ -836,7 +903,7 @@ class DungeonAutomation:
         max_clicks = step.get("max_clicks", 100)  # 总点击上限（防止死循环）
         max_duration = step.get("max_duration", 0)  # 总时间上限，0 = 不限制
         roi = step.get("roi")  # ★ 新增
-        roi_mode = step.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         start_all = time.time()
         total_clicks = 0
@@ -918,7 +985,7 @@ class DungeonAutomation:
         threshold = step.get("threshold", 0.8)
         interval = step.get("interval", 1.0)
         roi = step.get("roi")  # ★ 新增
-        roi_mode = srep.get("roi_mode")
+        roi_mode = step.get("roi_mode", "abs")
 
         log_func(
             f"[wait_for_template] 开始等待模板 {tpl} 出现，"
@@ -1107,9 +1174,13 @@ def debug_find_template(config_path: str, template_name: str, threshold: float =
 
     # 转灰度，然后走统一的灰度匹配接口
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    pos = auto.matcher._find_template_in_gray(gray, template_name, threshold=threshold)
+    pos = auto.matcher._find_template_in_gray(gray, template_name,
+                                              threshold=threshold,
+                                              roi=None,         # 调试时可以手工改
+                                              roi_mode="abs"
+                                              )
     print(f"[DEBUG] 模板 {template_name} 匹配结果:", pos)
 
 if __name__ == "__main__":
-            # 这里可以改成你想测试的模板名称&阈值
+    # 这里可以改成你想测试的模板名称&阈值
     debug_find_template("dungeon_config.json", "btn_menu.png", threshold=0.7)

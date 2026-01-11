@@ -17,7 +17,9 @@
         "action": "wait_and_click",
         "template": "btn_menu.png",
         "timeout": 10,
-        "threshold": 0.6
+        "threshold": 0.6,
+        "roi": [0.5, 0.0, 1.0, 0.5],
+        "roi_mode": "rel"
       }
     ],
 
@@ -151,7 +153,7 @@
         },
         {
           "action": "sleep",
-          "seconds": 3
+          "seconds": 4
         }
       ]
     }

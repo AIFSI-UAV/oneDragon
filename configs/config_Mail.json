@@ -22,7 +22,9 @@
         "action": "wait_and_click",
         "template": "btn_menu.png",
         "timeout": 10,
-        "threshold": 0.6
+        "threshold": 0.6,
+        "roi": [0.5, 0.0, 1.0, 0.5],
+        "roi_mode": "rel"
       }
     ],
 
@@ -167,7 +169,9 @@
           "templates": ["auto_play.png", "auto.png"],
           "timeout": 20,
           "threshold": 0.5,
-          "click_times": 1
+          "click_times": 1,
+          "roi": [0.3, 0.7, 0.7, 1.0],
+          "roi_mode": "rel"
         },
         {
           "action": "click_while_exists",
